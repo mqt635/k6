@@ -35,14 +35,14 @@ import (
 )
 
 const (
-	counterString = `"counter"`
-	gaugeString   = `"gauge"`
-	trendString   = `"trend"`
-	rateString    = `"rate"`
+	counterString = "counter"
+	gaugeString   = "gauge"
+	trendString   = "trend"
+	rateString    = "rate"
 
-	defaultString = `"default"`
-	timeString    = `"time"`
-	dataString    = `"data"`
+	defaultString = "default"
+	timeString    = "time"
+	dataString    = "data"
 )
 
 // Possible values for MetricType.
@@ -69,8 +69,17 @@ var ErrInvalidValueType = errors.New("invalid value type")
 // A MetricType specifies the type of a metric.
 type MetricType int
 
-// MarshalJSON serializes a MetricType as a human readable string.
+// MarshalJSON serializes a ValueType as a human readable string.
 func (t MetricType) MarshalJSON() ([]byte, error) {
+	txt, err := t.MarshalText()
+	if err != nil {
+		return nil, err
+	}
+	return []byte(`"` + string(txt) + `"`), nil
+}
+
+// MarshalText serializes a MetricType as a human readable string.
+func (t MetricType) MarshalText() ([]byte, error) {
 	switch t {
 	case Counter:
 		return []byte(counterString), nil
@@ -86,7 +95,7 @@ func (t MetricType) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON deserializes a MetricType from a string representation.
-func (t *MetricType) UnmarshalJSON(data []byte) error {
+func (t *MetricType) UnmarshalText(data []byte) error {
 	switch string(data) {
 	case counterString:
 		*t = Counter
@@ -123,6 +132,15 @@ type ValueType int
 
 // MarshalJSON serializes a ValueType as a human readable string.
 func (t ValueType) MarshalJSON() ([]byte, error) {
+	txt, err := t.MarshalText()
+	if err != nil {
+		return nil, err
+	}
+	return []byte(`"` + string(txt) + `"`), nil
+}
+
+// MarshalText serializes a ValueType as a human readable string.
+func (t ValueType) MarshalText() ([]byte, error) {
 	switch t {
 	case Default:
 		return []byte(defaultString), nil
@@ -135,8 +153,8 @@ func (t ValueType) MarshalJSON() ([]byte, error) {
 	}
 }
 
-// UnmarshalJSON deserializes a ValueType from a string representation.
-func (t *ValueType) UnmarshalJSON(data []byte) error {
+// UnmarshalText deserializes a ValueType from a string representation.
+func (t *ValueType) UnmarshalText(data []byte) error {
 	switch string(data) {
 	case defaultString:
 		*t = Default
@@ -525,14 +543,51 @@ func NewSubmetric(name string) (parentName string, sm *Submetric) {
 	return parts[0], &Submetric{Name: name, Parent: parts[0], Suffix: parts[1], Tags: IntoSampleTags(&tags)}
 }
 
-func (m *Metric) Summary(t time.Duration) *Summary {
-	return &Summary{
-		Metric:  m,
-		Summary: m.Sink.Format(t),
+// parsePercentile is a helper function to parse and validate percentile notations
+func parsePercentile(stat string) (float64, error) {
+	if !strings.HasPrefix(stat, "p(") || !strings.HasSuffix(stat, ")") {
+		return 0, fmt.Errorf("invalid trend stat '%s', unknown format", stat)
 	}
+
+	percentile, err := strconv.ParseFloat(stat[2:len(stat)-1], 64)
+
+	if err != nil || ((0 > percentile) || (percentile > 100)) {
+		return 0, fmt.Errorf("invalid percentile trend stat value '%s', provide a number between 0 and 100", stat)
+	}
+
+	return percentile, nil
 }
 
-type Summary struct {
-	Metric  *Metric            `json:"metric"`
-	Summary map[string]float64 `json:"summary"`
+// GetResolversForTrendColumns checks if passed trend columns are valid for use in
+// the summary output and then returns a map of the corresponding resolvers.
+func GetResolversForTrendColumns(trendColumns []string) (map[string]func(s *TrendSink) float64, error) {
+	staticResolvers := map[string]func(s *TrendSink) float64{
+		"avg":   func(s *TrendSink) float64 { return s.Avg },
+		"min":   func(s *TrendSink) float64 { return s.Min },
+		"med":   func(s *TrendSink) float64 { return s.Med },
+		"max":   func(s *TrendSink) float64 { return s.Max },
+		"count": func(s *TrendSink) float64 { return float64(s.Count) },
+	}
+	dynamicResolver := func(percentile float64) func(s *TrendSink) float64 {
+		return func(s *TrendSink) float64 {
+			return s.P(percentile / 100)
+		}
+	}
+
+	result := make(map[string]func(s *TrendSink) float64, len(trendColumns))
+
+	for _, stat := range trendColumns {
+		if staticStat, ok := staticResolvers[stat]; ok {
+			result[stat] = staticStat
+			continue
+		}
+
+		percentile, err := parsePercentile(stat)
+		if err != nil {
+			return nil, err
+		}
+		result[stat] = dynamicResolver(percentile)
+	}
+
+	return result, nil
 }

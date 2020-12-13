@@ -22,6 +22,7 @@ package lib
 
 import (
 	"context"
+	"io"
 
 	"github.com/loadimpact/k6/stats"
 )
@@ -97,4 +98,13 @@ type Runner interface {
 	// Returns whether the given name is an exported and executable
 	// function in the script.
 	IsExecutable(string) bool
+
+	HandleSummary(context.Context, *Summary) (map[string]io.Reader, error)
+}
+
+// Summary contains all of the data the summary handler gets.
+type Summary struct {
+	Metrics        map[string]*stats.Metric
+	RootGroup      *Group
+	ExecutionState *ExecutionState
 }

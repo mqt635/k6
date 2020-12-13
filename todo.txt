@@ -1,0 +1,12 @@
+todo:
+
+remove all of the old UI summary code, replacing it with JS
+
+documentation for --no-summary
+
+explanation for --summary-export changes
+
+document fallback to the old stdout summary if there was an exception in handleSummary()
+
+
+

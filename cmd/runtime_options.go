@@ -65,13 +65,25 @@ extended: base + Babel with ES2015 preset + core.js v2,
           slower and memory consuming but with greater JS support
 `)
 	flags.StringArrayP("env", "e", nil, "add/override environment variable with `VAR=value`")
+	flags.Bool("no-thresholds", false, "don't run thresholds")
+	flags.Bool("no-summary", false, "don't show the summary at the end of the test")
+	flags.String(
+		"summary-export",
+		"",
+		"output the end-of-test summary report to JSON file",
+	)
 	return flags
 }
 
 func getRuntimeOptions(flags *pflag.FlagSet, environment map[string]string) (lib.RuntimeOptions, error) {
+	// TODO: refactor with composable helpers as a part of #883, to reduce copy-paste
+	// TODO: get these options out of the JSON config file as well?
 	opts := lib.RuntimeOptions{
 		IncludeSystemEnvVars: getNullBool(flags, "include-system-env-vars"),
 		CompatibilityMode:    getNullString(flags, "compatibility-mode"),
+		NoThresholds:         getNullBool(flags, "no-thresholds"),
+		NoSummary:            getNullBool(flags, "no-summary"),
+		SummaryExport:        getNullString(flags, "summary-export"),
 		Env:                  make(map[string]string),
 	}
 
@@ -92,6 +104,32 @@ func getRuntimeOptions(flags *pflag.FlagSet, environment map[string]string) (lib
 				return opts, err
 			}
 			opts.IncludeSystemEnvVars = null.BoolFrom(val)
+		}
+	}
+
+	if !opts.NoThresholds.Valid { // If not explicitly set via CLI flags, look for an environment variable
+		if envVar, ok := environment["K6_NO_THRESHOLDS"]; ok {
+			val, err := strconv.ParseBool(envVar)
+			if err != nil {
+				return opts, err
+			}
+			opts.NoThresholds = null.BoolFrom(val)
+		}
+	}
+
+	if !opts.NoSummary.Valid { // If not explicitly set via CLI flags, look for an environment variable
+		if envVar, ok := environment["K6_NO_SUMMARY"]; ok {
+			val, err := strconv.ParseBool(envVar)
+			if err != nil {
+				return opts, err
+			}
+			opts.NoSummary = null.BoolFrom(val)
+		}
+	}
+
+	if !opts.SummaryExport.Valid { // If not explicitly set via CLI flags, look for an environment variable
+		if envVar, ok := environment["K6_SUMMARY_EXPORT"]; ok {
+			opts.SummaryExport = null.StringFrom(envVar)
 		}
 	}
 
