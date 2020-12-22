@@ -285,6 +285,27 @@ func TestRequestAndBatch(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	})
+
+	t.Run("post ArrayBuffer body", func(t *testing.T) {
+		tb.Mux.HandleFunc("/post-arraybuffer", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			require.Equal(t, "POST", r.Method)
+			var in bytes.Buffer
+			_, err := io.Copy(&in, r.Body)
+			require.NoError(t, err)
+			assert.Equal(t, "hello", in.String())
+			_, err = w.Write([]byte(`{"data": "` + in.String() + `"}`))
+			require.NoError(t, err)
+		}))
+		_, err := common.RunString(rt, sr(`
+			var arr = new Uint8Array([104, 101, 108, 108, 111]); // "hello"
+			var res = http.post("HTTPBIN_URL/post-arraybuffer", arr.buffer);
+
+			if (res.status != 200) { throw new Error("wrong status: " + res.status) }
+			if (res.json().data != "hello") { throw new Error("incorrect data : " + res.json().data) }
+			`))
+		assert.NoError(t, err)
+	})
+
 	t.Run("Timeout", func(t *testing.T) {
 		t.Run("10s", func(t *testing.T) {
 			_, err := common.RunString(rt, sr(`
