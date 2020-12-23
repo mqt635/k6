@@ -292,18 +292,32 @@ func TestRequestAndBatch(t *testing.T) {
 			var in bytes.Buffer
 			_, err := io.Copy(&in, r.Body)
 			require.NoError(t, err)
-			assert.Equal(t, "hello", in.String())
-			_, err = w.Write([]byte(`{"data": "` + in.String() + `"}`))
+			_, err = w.Write(in.Bytes())
 			require.NoError(t, err)
 		}))
-		_, err := common.RunString(rt, sr(`
-			var arr = new Uint8Array([104, 101, 108, 108, 111]); // "hello"
-			var res = http.post("HTTPBIN_URL/post-arraybuffer", arr.buffer);
+
+		testCases := []struct {
+			name, arr, expected string
+		}{
+			{"Uint8Array", `Uint8Array([104, 101, 108, 108, 111])`, "104,101,108,108,111"}, // "hello"
+			{"Uint16Array", `Uint16Array([104, 101, 108, 108, 111])`, "104,0,101,0,108,0,108,0,111,0"},
+			{"Uint32Array", `Uint32Array([104, 101, 108, 108, 111])`, "104,0,0,0,101,0,0,0,108,0,0,0,108,0,0,0,111,0,0,0"},
+		}
+
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.name, func(t *testing.T) {
+				_, err := common.RunString(rt, sr(fmt.Sprintf(`
+			var arr = new %[1]s;
+			var res = http.post("HTTPBIN_URL/post-arraybuffer", arr.buffer, { responseType: 'binary' });
 
 			if (res.status != 200) { throw new Error("wrong status: " + res.status) }
-			if (res.json().data != "hello") { throw new Error("incorrect data : " + res.json().data) }
-			`))
-		assert.NoError(t, err)
+			if (res.body != "%[2]s") { throw new Error(
+				"incorrect data: expected '%[2]s', received '" + res.body + "'") }
+			`, tc.arr, tc.expected)))
+				assert.NoError(t, err)
+			})
+		}
 	})
 
 	t.Run("Timeout", func(t *testing.T) {
