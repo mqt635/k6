@@ -96,7 +96,7 @@ const summaryWrapperLambdaCode = `
 		var result = {};
 		if (exportedSummaryCallback) {
 			try {
-				result = exportedSummaryCallback(data);
+				result = exportedSummaryCallback(data, oldCallback);
 			} catch (e) {
 				console.error('handleSummary() failed with error "' + e + '", falling back to the default summary');
 				//result["stdout"] = oldTextSummary(data);

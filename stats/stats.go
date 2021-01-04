@@ -69,7 +69,7 @@ var ErrInvalidValueType = errors.New("invalid value type")
 // A MetricType specifies the type of a metric.
 type MetricType int
 
-// MarshalJSON serializes a ValueType as a human readable string.
+// MarshalJSON serializes a MetricType as a human readable string.
 func (t MetricType) MarshalJSON() ([]byte, error) {
 	txt, err := t.MarshalText()
 	if err != nil {
@@ -94,7 +94,7 @@ func (t MetricType) MarshalText() ([]byte, error) {
 	}
 }
 
-// UnmarshalJSON deserializes a MetricType from a string representation.
+// UnmarshalText deserializes a MetricType from a string representation.
 func (t *MetricType) UnmarshalText(data []byte) error {
 	switch string(data) {
 	case counterString:
@@ -130,7 +130,7 @@ func (t MetricType) String() string {
 // The type of values a metric contains.
 type ValueType int
 
-// MarshalJSON serializes a ValueType as a human readable string.
+// MarshalJSON serializes a ValueType to a JSON string.
 func (t ValueType) MarshalJSON() ([]byte, error) {
 	txt, err := t.MarshalText()
 	if err != nil {
