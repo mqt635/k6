@@ -22,21 +22,24 @@ package js_test
 
 import (
 	"context"
+	"fmt"
 	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/loadimpact/k6/js"
-	"github.com/loadimpact/k6/js/common"
-	"github.com/loadimpact/k6/js/internal/modules"
-	"github.com/loadimpact/k6/lib"
-	"github.com/loadimpact/k6/lib/testutils"
-	"github.com/loadimpact/k6/loader"
-	"github.com/loadimpact/k6/stats"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/guregu/null.v3"
+
+	"go.k6.io/k6/js"
+	"go.k6.io/k6/js/common"
+	"go.k6.io/k6/js/modules"
+	"go.k6.io/k6/lib"
+	"go.k6.io/k6/lib/testutils"
+	"go.k6.io/k6/loader"
+	"go.k6.io/k6/stats"
 )
 
 type CheckModule struct {
@@ -59,19 +62,23 @@ func (cm *CheckModule) VuCtx(ctx context.Context) {
 	assert.NotNil(cm.t, lib.GetState(ctx))
 }
 
-func TestNewJSRunnerWithCustomModule(t *testing.T) {
-	checkModule := &CheckModule{t: t}
-	modules.Register("k6/check", checkModule)
+var uniqueModuleNumber int64 //nolint:gochecknoglobals
 
-	script := `
-		var check = require("k6/check");
+func TestNewJSRunnerWithCustomModule(t *testing.T) {
+	t.Parallel()
+	checkModule := &CheckModule{t: t}
+	moduleName := fmt.Sprintf("k6/x/check-%d", atomic.AddInt64(&uniqueModuleNumber, 1))
+	modules.Register(moduleName, checkModule)
+
+	script := fmt.Sprintf(`
+		var check = require("%s");
 		check.initCtx();
 
 		module.exports.options = { vus: 1, iterations: 1 };
 		module.exports.default = function() {
 			check.vuCtx();
 		};
-	`
+	`, moduleName)
 
 	logger := testutils.NewLogger(t)
 	rtOptions := lib.RuntimeOptions{CompatibilityMode: null.StringFrom("base")}
@@ -88,7 +95,7 @@ func TestNewJSRunnerWithCustomModule(t *testing.T) {
 	assert.Equal(t, checkModule.initCtxCalled, 1)
 	assert.Equal(t, checkModule.vuCtxCalled, 0)
 
-	vu, err := runner.NewVU(1, make(chan stats.SampleContainer, 100))
+	vu, err := runner.NewVU(1, 1, make(chan stats.SampleContainer, 100))
 	require.NoError(t, err)
 	assert.Equal(t, checkModule.initCtxCalled, 2)
 	assert.Equal(t, checkModule.vuCtxCalled, 0)
@@ -112,7 +119,7 @@ func TestNewJSRunnerWithCustomModule(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, checkModule.initCtxCalled, 3) // changes because we need to get the exported functions
 	assert.Equal(t, checkModule.vuCtxCalled, 2)
-	vuFromArc, err := runnerFromArc.NewVU(2, make(chan stats.SampleContainer, 100))
+	vuFromArc, err := runnerFromArc.NewVU(2, 2, make(chan stats.SampleContainer, 100))
 	require.NoError(t, err)
 	assert.Equal(t, checkModule.initCtxCalled, 4)
 	assert.Equal(t, checkModule.vuCtxCalled, 2)

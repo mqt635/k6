@@ -29,23 +29,25 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/guregu/null.v3"
 
-	"github.com/loadimpact/k6/core/local"
-	"github.com/loadimpact/k6/js"
-	"github.com/loadimpact/k6/lib"
-	"github.com/loadimpact/k6/lib/executor"
-	"github.com/loadimpact/k6/lib/metrics"
-	"github.com/loadimpact/k6/lib/testutils"
-	"github.com/loadimpact/k6/lib/testutils/httpmultibin"
-	"github.com/loadimpact/k6/lib/testutils/minirunner"
-	"github.com/loadimpact/k6/lib/testutils/mockoutput"
-	"github.com/loadimpact/k6/lib/types"
-	"github.com/loadimpact/k6/loader"
-	"github.com/loadimpact/k6/output"
-	"github.com/loadimpact/k6/stats"
+	"go.k6.io/k6/core/local"
+	"go.k6.io/k6/errext"
+	"go.k6.io/k6/js"
+	"go.k6.io/k6/lib"
+	"go.k6.io/k6/lib/executor"
+	"go.k6.io/k6/lib/metrics"
+	"go.k6.io/k6/lib/testutils"
+	"go.k6.io/k6/lib/testutils/httpmultibin"
+	"go.k6.io/k6/lib/testutils/minirunner"
+	"go.k6.io/k6/lib/testutils/mockoutput"
+	"go.k6.io/k6/lib/types"
+	"go.k6.io/k6/loader"
+	"go.k6.io/k6/output"
+	"go.k6.io/k6/stats"
 )
 
 const isWindows = runtime.GOOS == "windows"
@@ -93,12 +95,15 @@ func newTestEngine( //nolint:golint
 }
 
 func TestNewEngine(t *testing.T) {
+	t.Parallel()
 	newTestEngine(t, nil, nil, nil, lib.Options{})
 }
 
 func TestEngineRun(t *testing.T) {
+	t.Parallel()
 	logrus.SetLevel(logrus.DebugLevel)
 	t.Run("exits with context", func(t *testing.T) {
+		t.Parallel()
 		done := make(chan struct{})
 		runner := &minirunner.MiniRunner{Fn: func(ctx context.Context, out chan<- stats.SampleContainer) error {
 			<-ctx.Done()
@@ -119,6 +124,7 @@ func TestEngineRun(t *testing.T) {
 		<-done
 	})
 	t.Run("exits with executor", func(t *testing.T) {
+		t.Parallel()
 		e, run, wait := newTestEngine(t, nil, nil, nil, lib.Options{
 			VUs:        null.IntFrom(10),
 			Iterations: null.IntFrom(100),
@@ -129,6 +135,7 @@ func TestEngineRun(t *testing.T) {
 	})
 	// Make sure samples are discarded after context close (using "cutoff" timestamp in local.go)
 	t.Run("collects samples", func(t *testing.T) {
+		t.Parallel()
 		testMetric := stats.New("test_metric", stats.Trend)
 
 		signalChan := make(chan interface{})
@@ -168,6 +175,7 @@ func TestEngineRun(t *testing.T) {
 }
 
 func TestEngineAtTime(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	_, run, wait := newTestEngine(t, ctx, nil, nil, lib.Options{
@@ -180,6 +188,7 @@ func TestEngineAtTime(t *testing.T) {
 }
 
 func TestEngineStopped(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	e, run, wait := newTestEngine(t, ctx, nil, nil, lib.Options{
@@ -196,6 +205,7 @@ func TestEngineStopped(t *testing.T) {
 }
 
 func TestEngineOutput(t *testing.T) {
+	t.Parallel()
 	testMetric := stats.New("test_metric", stats.Trend)
 
 	runner := &minirunner.MiniRunner{Fn: func(ctx context.Context, out chan<- stats.SampleContainer) error {
@@ -230,9 +240,11 @@ func TestEngineOutput(t *testing.T) {
 }
 
 func TestEngine_processSamples(t *testing.T) {
+	t.Parallel()
 	metric := stats.New("my_metric", stats.Gauge)
 
 	t.Run("metric", func(t *testing.T) {
+		t.Parallel()
 		e, _, wait := newTestEngine(t, nil, nil, nil, lib.Options{})
 		defer wait()
 
@@ -243,6 +255,7 @@ func TestEngine_processSamples(t *testing.T) {
 		assert.IsType(t, &stats.GaugeSink{}, e.Metrics["my_metric"].Sink)
 	})
 	t.Run("submetric", func(t *testing.T) {
+		t.Parallel()
 		ths, err := stats.NewThresholds([]string{`1+1==2`})
 		assert.NoError(t, err)
 
@@ -268,6 +281,7 @@ func TestEngine_processSamples(t *testing.T) {
 }
 
 func TestEngineThresholdsWillAbort(t *testing.T) {
+	t.Parallel()
 	metric := stats.New("my_metric", stats.Gauge)
 
 	ths, err := stats.NewThresholds([]string{"1+1==3"})
@@ -286,6 +300,7 @@ func TestEngineThresholdsWillAbort(t *testing.T) {
 }
 
 func TestEngineAbortedByThresholds(t *testing.T) {
+	t.Parallel()
 	metric := stats.New("my_metric", stats.Gauge)
 
 	ths, err := stats.NewThresholds([]string{"1+1==3"})
@@ -318,6 +333,7 @@ func TestEngineAbortedByThresholds(t *testing.T) {
 }
 
 func TestEngine_processThresholds(t *testing.T) {
+	t.Parallel()
 	metric := stats.New("my_metric", stats.Gauge)
 
 	testdata := map[string]struct {
@@ -338,6 +354,7 @@ func TestEngine_processThresholds(t *testing.T) {
 	for name, data := range testdata {
 		name, data := name, data
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			thresholds := make(map[string]stats.Thresholds, len(data.ths))
 			for m, srcs := range data.ths {
 				ths, err := stats.NewThresholds(srcs)
@@ -381,13 +398,23 @@ func getMetricCount(mo *mockoutput.MockOutput, name string) (result uint) {
 	return
 }
 
+func getMetricMax(mo *mockoutput.MockOutput, name string) (result float64) {
+	for _, sc := range mo.SampleContainers {
+		for _, s := range sc.GetSamples() {
+			if s.Metric.Name == name && s.Value > result {
+				result = s.Value
+			}
+		}
+	}
+	return
+}
+
 const expectedHeaderMaxLength = 500
 
 // FIXME: This test is too brittle, consider simplifying.
 func TestSentReceivedMetrics(t *testing.T) {
 	t.Parallel()
 	tb := httpmultibin.NewHTTPMultiBin(t)
-	defer tb.Cleanup()
 	tr := tb.Replacer.Replace
 
 	type testScript struct {
@@ -417,7 +444,7 @@ func TestSentReceivedMetrics(t *testing.T) {
 		// NOTE(imiric): This needs to keep testing against /ws-echo-invalid because
 		// this test is highly sensitive to metric data, and slightly differing
 		// WS server implementations might introduce flakiness.
-		// See https://github.com/loadimpact/k6/pull/1149
+		// See https://github.com/k6io/k6/pull/1149
 		{tr(`import ws from "k6/ws";
 			let data = "0123456789".repeat(100);
 			export default function() {
@@ -502,6 +529,7 @@ func TestSentReceivedMetrics(t *testing.T) {
 
 	// This Run will not return until the parallel subtests complete.
 	t.Run("group", func(t *testing.T) {
+		t.Parallel()
 		for tsNum, ts := range testScripts {
 			for tcNum, tc := range testCases {
 				t.Run(
@@ -516,7 +544,6 @@ func TestSentReceivedMetrics(t *testing.T) {
 func TestRunTags(t *testing.T) {
 	t.Parallel()
 	tb := httpmultibin.NewHTTPMultiBin(t)
-	defer tb.Cleanup()
 
 	runTagsMap := map[string]string{"foo": "bar", "test": "mest", "over": "written"}
 	runTags := stats.NewSampleTags(runTagsMap)
@@ -632,7 +659,6 @@ func TestRunTags(t *testing.T) {
 func TestSetupTeardownThresholds(t *testing.T) {
 	t.Parallel()
 	tb := httpmultibin.NewHTTPMultiBin(t)
-	defer tb.Cleanup()
 
 	script := []byte(tb.Replacer.Replace(`
 		import http from "k6/http";
@@ -692,10 +718,111 @@ func TestSetupTeardownThresholds(t *testing.T) {
 	}
 }
 
+func TestSetupException(t *testing.T) {
+	t.Parallel()
+
+	script := []byte(`
+	import bar from "./bar.js";
+	export function setup() {
+		bar();
+	};
+	export default function() {
+	};
+	`)
+
+	memfs := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(memfs, "/bar.js", []byte(`
+	export default function () {
+        baz();
+	}
+	function baz() {
+		        throw new Error("baz");
+			}
+	`), 0x666))
+	runner, err := js.New(
+		testutils.NewLogger(t),
+		&loader.SourceData{URL: &url.URL{Scheme: "file", Path: "/script.js"}, Data: script},
+		map[string]afero.Fs{"file": memfs},
+		lib.RuntimeOptions{},
+	)
+	require.NoError(t, err)
+
+	_, run, wait := newTestEngine(t, nil, runner, nil, lib.Options{
+		SystemTags:      &stats.DefaultSystemTagSet,
+		SetupTimeout:    types.NullDurationFrom(3 * time.Second),
+		TeardownTimeout: types.NullDurationFrom(3 * time.Second),
+		VUs:             null.IntFrom(3),
+	})
+	defer wait()
+
+	errC := make(chan error)
+	go func() { errC <- run() }()
+
+	select {
+	case <-time.After(10 * time.Second):
+		t.Fatal("Test timed out")
+	case err := <-errC:
+		require.Error(t, err)
+		var exception errext.Exception
+		require.ErrorAs(t, err, &exception)
+		require.Equal(t, "Error: baz\n\tat baz (file:///bar.js:7:8(4))\n"+
+			"\tat file:///bar.js:4:5(3)\n\tat setup (file:///script.js:7:204(4))\n",
+			err.Error())
+	}
+}
+
+func TestVuInitException(t *testing.T) {
+	t.Parallel()
+
+	script := []byte(`
+		export let options = {
+			vus: 3,
+			iterations: 5,
+		};
+
+		export default function() {};
+
+		if (__VU == 2) {
+			throw new Error('oops in ' + __VU);
+		}
+	`)
+
+	logger := testutils.NewLogger(t)
+	runner, err := js.New(
+		logger,
+		&loader.SourceData{URL: &url.URL{Scheme: "file", Path: "/script.js"}, Data: script},
+		nil, lib.RuntimeOptions{},
+	)
+	require.NoError(t, err)
+
+	opts, err := executor.DeriveScenariosFromShortcuts(runner.GetOptions())
+	require.NoError(t, err)
+	require.Empty(t, opts.Validate())
+	require.NoError(t, runner.SetOptions(opts))
+
+	execScheduler, err := local.NewExecutionScheduler(runner, logger)
+	require.NoError(t, err)
+	engine, err := NewEngine(execScheduler, opts, lib.RuntimeOptions{}, nil, logger)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, _, err = engine.Init(ctx, ctx) // no need for 2 different contexts
+
+	require.Error(t, err)
+
+	var exception errext.Exception
+	require.ErrorAs(t, err, &exception)
+	assert.Equal(t, "Error: oops in 2\n\tat file:///script.js:10:8(32)\n", err.Error())
+
+	var errWithHint errext.HasHint
+	require.ErrorAs(t, err, &errWithHint)
+	assert.Equal(t, "error while initializing VU #2 (script exception)", errWithHint.Hint())
+}
+
 func TestEmittedMetricsWhenScalingDown(t *testing.T) {
 	t.Parallel()
 	tb := httpmultibin.NewHTTPMultiBin(t)
-	defer tb.Cleanup()
 
 	script := []byte(tb.Replacer.Replace(`
 		import http from "k6/http";
@@ -919,6 +1046,7 @@ func TestMinIterationDurationInSetupTeardownStage(t *testing.T) {
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			runner, err := js.New(
 				testutils.NewLogger(t),
 				&loader.SourceData{URL: &url.URL{Path: "/script.js"}, Data: []byte(tc.script)},
@@ -944,6 +1072,7 @@ func TestMinIterationDurationInSetupTeardownStage(t *testing.T) {
 }
 
 func TestEngineRunsTeardownEvenAfterTestRunIsAborted(t *testing.T) {
+	t.Parallel()
 	testMetric := stats.New("teardown_metric", stats.Counter)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -974,4 +1103,100 @@ func TestEngineRunsTeardownEvenAfterTestRunIsAborted(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 1.0, count)
+}
+
+func TestActiveVUsCount(t *testing.T) {
+	t.Parallel()
+
+	script := []byte(`
+		var sleep = require('k6').sleep;
+
+		exports.options = {
+			scenarios: {
+				carr1: {
+					executor: 'constant-arrival-rate',
+					rate: 10,
+					preAllocatedVUs: 1,
+					maxVUs: 10,
+					startTime: '0s',
+					duration: '3s',
+					gracefulStop: '0s',
+				},
+				carr2: {
+					executor: 'constant-arrival-rate',
+					rate: 10,
+					preAllocatedVUs: 1,
+					maxVUs: 10,
+					duration: '3s',
+					startTime: '3s',
+					gracefulStop: '0s',
+				},
+				rarr: {
+					executor: 'ramping-arrival-rate',
+					startRate: 5,
+					stages: [
+						{ target: 10, duration: '2s' },
+						{ target: 0, duration: '2s' },
+					],
+					preAllocatedVUs: 1,
+					maxVUs: 10,
+					startTime: '6s',
+					gracefulStop: '0s',
+				},
+			}
+		}
+
+		exports.default = function () {
+			sleep(5);
+		}
+	`)
+
+	logger := testutils.NewLogger(t)
+	logHook := testutils.SimpleLogrusHook{HookedLevels: logrus.AllLevels}
+	logger.AddHook(&logHook)
+
+	rtOpts := lib.RuntimeOptions{CompatibilityMode: null.StringFrom("base")}
+
+	runner, err := js.New(logger, &loader.SourceData{URL: &url.URL{Path: "/script.js"}, Data: script}, nil, rtOpts)
+	require.NoError(t, err)
+
+	mockOutput := mockoutput.New()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts, err := executor.DeriveScenariosFromShortcuts(lib.Options{
+		MetricSamplesBufferSize: null.NewInt(200, false),
+	}.Apply(runner.GetOptions()))
+	require.NoError(t, err)
+	require.Empty(t, opts.Validate())
+	require.NoError(t, runner.SetOptions(opts))
+	execScheduler, err := local.NewExecutionScheduler(runner, logger)
+	require.NoError(t, err)
+	engine, err := NewEngine(execScheduler, opts, rtOpts, []output.Output{mockOutput}, logger)
+	require.NoError(t, err)
+	run, waitFn, err := engine.Init(ctx, ctx) // no need for 2 different contexts
+	require.NoError(t, err)
+
+	errC := make(chan error)
+	go func() { errC <- run() }()
+
+	select {
+	case <-time.After(15 * time.Second):
+		t.Fatal("Test timed out")
+	case err := <-errC:
+		require.NoError(t, err)
+		cancel()
+		waitFn()
+		require.False(t, engine.IsTainted())
+	}
+
+	assert.Equal(t, 10.0, getMetricMax(mockOutput, metrics.VUs.Name))
+	assert.Equal(t, 10.0, getMetricMax(mockOutput, metrics.VUsMax.Name))
+
+	logEntries := logHook.Drain()
+	assert.Len(t, logEntries, 3)
+	for _, logEntry := range logEntries {
+		assert.Equal(t, logrus.WarnLevel, logEntry.Level)
+		assert.Equal(t, "Insufficient VUs, reached 10 active VUs and cannot initialize more", logEntry.Message)
+	}
 }

@@ -68,28 +68,62 @@ brew install k6
 
 ### Windows
 
-You can manually download and install the [official `.msi` installation package](https://dl.bintray.com/loadimpact/windows/k6-v0.31.1-amd64.msi) or, if you use the [chocolatey package manager](https://chocolatey.org/), follow [these instructions](https://bintray.com/repo/buildSettings?repoPath=%2Floadimpact%2Fchoco) to set up the k6 repository.
+If you use the [Chocolatey package manager](https://chocolatey.org/) you can install the unofficial k6 package with:
+
+```
+choco install k6
+```
+
+Otherwise you can manually download and install the [latest official `.msi` package](https://dl.k6.io/msi/k6-latest-amd64.msi).
 
 ### Linux
 
-**Notice: Because [Bintray is being shutdown](https://jfrog.com/blog/into-the-sunset-bintray-jcenter-gocenter-and-chartcenter/) we are going to start self-hosting our packages soon, before k6 v0.32.0. This means you will have to re-install them, since the old .rpm and .deb repos will stop working.**
-
-For Debian-based Linux distributions, you can install k6 from the private deb repo like this:
+For Debian-based Linux distributions like Ubuntu, you can install k6 from the private deb repo like this:
 
 ```bash
-sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 379CE192D401AB61
-echo "deb https://dl.bintray.com/loadimpact/deb stable main" | sudo tee -a /etc/apt/sources.list
+sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+echo "deb https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
 sudo apt-get update
 sudo apt-get install k6
 ```
 
+If you have issues adding the key from the keyserver, you can instead run:
+```bash
+curl -s https://dl.k6.io/key.gpg | sudo apt-key add -
+```
+
+Then confirm that the key with the above ID is shown in the output of `sudo apt-key list`.
+
 And for rpm-based ones like Fedora and CentOS:
 
 ```bash
-wget https://bintray.com/loadimpact/rpm/rpm -O bintray-loadimpact-rpm.repo
-sudo mv bintray-loadimpact-rpm.repo /etc/yum.repos.d/
-sudo dnf install k6   # use yum instead of dnf for older distros
+sudo dnf install https://dl.k6.io/rpm/repo.rpm    # use yum instead of dnf for older distros
+sudo dnf install k6    # use yum install --nogpgcheck k6 for older distros (e.g. CentOS 7) without PGP V4 signature support
 ```
+
+Note that the `gnupg2` package is required for signature verification.
+
+
+#### Migrating from Bintray
+
+The Bintray repositories will be [shutdown after May 1st, 2021](https://jfrog.com/blog/into-the-sunset-bintray-jcenter-gocenter-and-chartcenter/). If you previously added them you will have to add our repositories following the instructions above and should delete the Bintray ones.
+
+For Debian-based distributions, you can run:
+
+```bash
+sudo sed -i '/dl\.bintray\.com\/loadimpact\/deb/d' /etc/apt/sources.list
+sudo apt-key del 379CE192D401AB61
+sudo apt-get update
+```
+
+Or delete the repository file if you added it to `/etc/apt/sources.list.d/`.
+
+And for rpm-based ones, delete the repository file in `/etc/yum.repos.d/`. If you followed the [official installation instructions](https://k6.io/docs/getting-started/installation/#fedora-centos), this should be:
+
+```bash
+sudo rm /etc/yum.repos.d/bintray-loadimpact-rpm.repo
+```
+
 
 ### Docker
 
@@ -103,10 +137,10 @@ If there isn't an official package for your operating system or architecture, or
 
 ### Build from source
 
-k6 is written in Go, so it's just a single statically-linked executable and very easy to build and distribute. To build from source you need **[Git](https://git-scm.com/downloads)** and **[Go](https://golang.org/doc/install)** (1.12 or newer). Follow these instructions:
+k6 is written in Go, so it's just a single statically-linked executable and very easy to build and distribute. To build from source you need **[Git](https://git-scm.com/downloads)** and **[Go](https://golang.org/doc/install)** (1.16 or newer). Follow these instructions:
 
-- Run `go get github.com/loadimpact/k6` which will:
-  - git clone the repo and put the source in `$GOPATH/src/github.com/loadimpact/k6`
+- Run `go get go.k6.io/k6` which will:
+  - git clone the repo and put the source in `$GOPATH/src/go.k6.io/k6`
   - build a `k6` binary and put it in `$GOPATH/bin`
 - Make sure you have `$GOPATH/bin` in your `PATH` (or copy the `k6` binary somewhere in your `PATH`), so you are able to run k6 from any location.
 - Tada, you can now run k6 using `k6 run script.js`

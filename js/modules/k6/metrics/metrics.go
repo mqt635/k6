@@ -29,15 +29,10 @@ import (
 
 	"github.com/dop251/goja"
 
-	"github.com/loadimpact/k6/js/common"
-	"github.com/loadimpact/k6/js/internal/modules"
-	"github.com/loadimpact/k6/lib"
-	"github.com/loadimpact/k6/stats"
+	"go.k6.io/k6/js/common"
+	"go.k6.io/k6/lib"
+	"go.k6.io/k6/stats"
 )
-
-func init() {
-	modules.Register("k6/metrics", New())
-}
 
 var nameRegexString = "^[\\p{L}\\p{N}\\._ !\\?/&#\\(\\)<>%-]{1,128}$"
 
@@ -59,7 +54,7 @@ func newMetric(ctxPtr *context.Context, name string, t stats.MetricType, isTime 
 		return nil, errors.New("metrics must be declared in the init context")
 	}
 
-	//TODO: move verification outside the JS
+	// TODO: move verification outside the JS
 	if !checkName(name) {
 		return nil, common.NewInitContextError(fmt.Sprintf("Invalid metric name: '%s'", name))
 	}
@@ -70,7 +65,16 @@ func newMetric(ctxPtr *context.Context, name string, t stats.MetricType, isTime 
 	}
 
 	rt := common.GetRuntime(*ctxPtr)
-	return common.Bind(rt, Metric{stats.New(name, t, valueType)}, ctxPtr), nil
+	bound := common.Bind(rt, Metric{stats.New(name, t, valueType)}, ctxPtr)
+	o := rt.NewObject()
+	err := o.DefineDataProperty("name", rt.ToValue(name), goja.FLAG_FALSE, goja.FLAG_FALSE, goja.FLAG_TRUE)
+	if err != nil {
+		return nil, err
+	}
+	if err = o.Set("add", rt.ToValue(bound["add"])); err != nil {
+		return nil, err
+	}
+	return o, nil
 }
 
 func (m Metric) Add(ctx context.Context, v goja.Value, addTags ...map[string]string) (bool, error) {

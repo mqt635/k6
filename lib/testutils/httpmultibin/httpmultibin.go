@@ -41,8 +41,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/klauspost/compress/zstd"
 	"github.com/mccutchen/go-httpbin/httpbin"
-	"github.com/pkg/errors"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/http2"
 	"google.golang.org/grpc"
@@ -50,10 +48,9 @@ import (
 	"google.golang.org/grpc/status"
 	grpctest "google.golang.org/grpc/test/grpc_testing"
 
-	"github.com/loadimpact/k6/lib"
-	"github.com/loadimpact/k6/lib/netext"
-	"github.com/loadimpact/k6/lib/netext/httpext"
-	"github.com/loadimpact/k6/lib/types"
+	"go.k6.io/k6/lib"
+	"go.k6.io/k6/lib/netext"
+	"go.k6.io/k6/lib/types"
 )
 
 // GetTLSClientConfig returns a TLS config that trusts the supplied
@@ -102,7 +99,6 @@ type HTTPMultiBin struct {
 	Dialer          *netext.Dialer
 	HTTPTransport   *http.Transport
 	Context         context.Context
-	Cleanup         func()
 }
 
 type jsonBody struct {
@@ -151,10 +147,13 @@ func getWebsocketHandler(echo bool, closePrematurely bool) http.Handler {
 func writeJSON(w io.Writer, v interface{}) error {
 	e := json.NewEncoder(w)
 	e.SetIndent("", "  ")
-	return errors.Wrap(e.Encode(v), "failed to encode JSON")
+	if err := e.Encode(v); err != nil {
+		return fmt.Errorf("failed to encode JSON: %w", err)
+	}
+	return nil
 }
 
-func getEncodedHandler(t testing.TB, compressionType httpext.CompressionType) http.Handler {
+func getEncodedHandler(t testing.TB, compressionType string) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		var (
 			encoding string
@@ -163,10 +162,10 @@ func getEncodedHandler(t testing.TB, compressionType httpext.CompressionType) ht
 		)
 
 		switch compressionType {
-		case httpext.CompressionTypeBr:
+		case "br":
 			encw = brotli.NewWriter(rw)
 			encoding = "br"
-		case httpext.CompressionTypeZstd:
+		case "zstd":
 			encw, _ = zstd.NewWriter(rw)
 			encoding = "zstd"
 		}
@@ -181,9 +180,7 @@ func getEncodedHandler(t testing.TB, compressionType httpext.CompressionType) ht
 		if encw != nil {
 			_ = encw.Close()
 		}
-		if !assert.NoError(t, err) {
-			return
-		}
+		require.NoError(t, err)
 	})
 }
 
@@ -255,15 +252,16 @@ func (*GRPCStub) HalfDuplexCall(grpctest.TestService_HalfDuplexCallServer) error
 }
 
 // NewHTTPMultiBin returns a fully configured and running HTTPMultiBin
+//nolint:funlen
 func NewHTTPMultiBin(t testing.TB) *HTTPMultiBin {
 	// Create a http.ServeMux and set the httpbin handler as the default
 	mux := http.NewServeMux()
-	mux.Handle("/brotli", getEncodedHandler(t, httpext.CompressionTypeBr))
+	mux.Handle("/brotli", getEncodedHandler(t, "br"))
 	mux.Handle("/ws-echo", getWebsocketHandler(true, false))
 	mux.Handle("/ws-echo-invalid", getWebsocketHandler(true, true))
 	mux.Handle("/ws-close", getWebsocketHandler(false, false))
 	mux.Handle("/ws-close-invalid", getWebsocketHandler(false, true))
-	mux.Handle("/zstd", getEncodedHandler(t, httpext.CompressionTypeZstd))
+	mux.Handle("/zstd", getEncodedHandler(t, "zstd"))
 	mux.Handle("/zstd-br", getZstdBrHandler(t))
 	mux.Handle("/", httpbin.New().Handler())
 
@@ -333,7 +331,7 @@ func NewHTTPMultiBin(t testing.TB) *HTTPMultiBin {
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
 
-	return &HTTPMultiBin{
+	result := &HTTPMultiBin{
 		Mux:         mux,
 		ServerHTTP:  httpSrv,
 		ServerHTTPS: httpsSrv,
@@ -366,12 +364,14 @@ func NewHTTPMultiBin(t testing.TB) *HTTPMultiBin {
 		Dialer:          dialer,
 		HTTPTransport:   transport,
 		Context:         ctx,
-		Cleanup: func() {
-			grpcSrv.Stop()
-			http2Srv.Close()
-			httpsSrv.Close()
-			httpSrv.Close()
-			ctxCancel()
-		},
 	}
+
+	t.Cleanup(func() {
+		grpcSrv.Stop()
+		http2Srv.Close()
+		httpsSrv.Close()
+		httpSrv.Close()
+		ctxCancel()
+	})
+	return result
 }

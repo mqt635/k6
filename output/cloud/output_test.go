@@ -33,22 +33,23 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/loadimpact/k6/cloudapi"
-	"github.com/loadimpact/k6/lib"
-	"github.com/loadimpact/k6/lib/metrics"
-	"github.com/loadimpact/k6/lib/netext"
-	"github.com/loadimpact/k6/lib/netext/httpext"
-	"github.com/loadimpact/k6/lib/testutils"
-	"github.com/loadimpact/k6/lib/testutils/httpmultibin"
-	"github.com/loadimpact/k6/lib/types"
-	"github.com/loadimpact/k6/output"
-	"github.com/loadimpact/k6/stats"
+	"go.k6.io/k6/cloudapi"
+	"go.k6.io/k6/lib"
+	"go.k6.io/k6/lib/metrics"
+	"go.k6.io/k6/lib/netext"
+	"go.k6.io/k6/lib/netext/httpext"
+	"go.k6.io/k6/lib/testutils"
+	"go.k6.io/k6/lib/testutils/httpmultibin"
+	"go.k6.io/k6/lib/types"
+	"go.k6.io/k6/output"
+	"go.k6.io/k6/stats"
 )
 
 func tagEqual(expected, got *stats.SampleTags) bool {
@@ -176,7 +177,6 @@ func runCloudOutputTestCase(t *testing.T, minSamples int) {
 		}`, minSamples)
 		require.NoError(t, err)
 	}))
-	defer tb.Cleanup()
 
 	out, err := newOutput(output.Params{
 		Logger:     testutils.NewLogger(t),
@@ -321,7 +321,6 @@ func TestCloudOutputMaxPerPacket(t *testing.T) {
 		require.NoError(t, err)
 	}))
 	tb.Mux.HandleFunc("/v1/tests/12", func(rw http.ResponseWriter, _ *http.Request) { rw.WriteHeader(http.StatusOK) })
-	defer tb.Cleanup()
 
 	out, err := newOutput(output.Params{
 		Logger:     testutils.NewLogger(t),
@@ -387,6 +386,18 @@ func TestCloudOutputMaxPerPacket(t *testing.T) {
 
 func TestCloudOutputStopSendingMetric(t *testing.T) {
 	t.Parallel()
+	t.Run("stop engine on error", func(t *testing.T) {
+		t.Parallel()
+		testCloudOutputStopSendingMetric(t, true)
+	})
+
+	t.Run("don't stop engine on error", func(t *testing.T) {
+		t.Parallel()
+		testCloudOutputStopSendingMetric(t, false)
+	})
+}
+
+func testCloudOutputStopSendingMetric(t *testing.T, stopOnError bool) {
 	tb := httpmultibin.NewHTTPMultiBin(t)
 	tb.Mux.HandleFunc("/v1/tests", http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
 		body, err := ioutil.ReadAll(req.Body)
@@ -409,15 +420,15 @@ func TestCloudOutputStopSendingMetric(t *testing.T) {
 		require.NoError(t, err)
 	}))
 	tb.Mux.HandleFunc("/v1/tests/12", func(rw http.ResponseWriter, _ *http.Request) { rw.WriteHeader(http.StatusOK) })
-	defer tb.Cleanup()
 
 	out, err := newOutput(output.Params{
 		Logger: testutils.NewLogger(t),
 		JSONConfig: json.RawMessage(fmt.Sprintf(`{
 			"host": "%s", "noCompress": true,
 			"maxMetricSamplesPerPackage": 50,
-			"name": "something-that-should-be-overwritten"
-		}`, tb.ServerHTTP.URL)),
+			"name": "something-that-should-be-overwritten",
+			"stopOnError": %t
+		}`, tb.ServerHTTP.URL, stopOnError)),
 		ScriptOptions: lib.Options{
 			Duration:   types.NullDurationFrom(1 * time.Second),
 			SystemTags: &stats.DefaultSystemTagSet,
@@ -427,6 +438,14 @@ func TestCloudOutputStopSendingMetric(t *testing.T) {
 		},
 		ScriptPath: &url.URL{Path: "/script.js"},
 	})
+	var expectedEngineStopFuncCalled int64
+	if stopOnError {
+		expectedEngineStopFuncCalled = 1
+	}
+	var engineStopFuncCalled int64
+	out.engineStopFunc = func(error) {
+		atomic.AddInt64(&engineStopFuncCalled, 1)
+	}
 	require.NoError(t, err)
 	now := time.Now()
 	tags := stats.IntoSampleTags(&map[string]string{"test": "mest", "a": "b"})
@@ -495,6 +514,7 @@ func TestCloudOutputStopSendingMetric(t *testing.T) {
 		t.Fatal("sending metrics wasn't stopped")
 	}
 	require.Equal(t, max, count)
+	require.Equal(t, expectedEngineStopFuncCalled, engineStopFuncCalled)
 
 	nBufferSamples := len(out.bufferSamples)
 	nBufferHTTPTrails := len(out.bufferHTTPTrails)
@@ -539,7 +559,6 @@ func TestCloudOutputAggregationPeriodZeroNoBlock(t *testing.T) {
 		require.NoError(t, err)
 	}))
 	tb.Mux.HandleFunc("/v1/tests/123", func(rw http.ResponseWriter, _ *http.Request) { rw.WriteHeader(http.StatusOK) })
-	defer tb.Cleanup()
 
 	out, err := newOutput(output.Params{
 		Logger: testutils.NewLogger(t),
@@ -586,7 +605,6 @@ func TestCloudOutputPushRefID(t *testing.T) {
 	defer close(expSamples)
 
 	tb := httpmultibin.NewHTTPMultiBin(t)
-	defer tb.Cleanup()
 	failHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("%s should not have been called at all", r.RequestURI)
 	})
@@ -658,7 +676,6 @@ func TestCloudOutputRecvIterLIAllIterations(t *testing.T) {
 		require.NoError(t, err)
 	}))
 	tb.Mux.HandleFunc("/v1/tests/123", func(rw http.ResponseWriter, _ *http.Request) { rw.WriteHeader(http.StatusOK) })
-	defer tb.Cleanup()
 
 	out, err := newOutput(output.Params{
 		Logger: testutils.NewLogger(t),
@@ -750,12 +767,12 @@ func TestNewName(t *testing.T) {
 	}{
 		{
 			url: &url.URL{
-				Opaque: "github.com/loadimpact/k6/samples/http_get.js",
+				Opaque: "go.k6.io/k6/samples/http_get.js",
 			},
 			expected: "http_get.js",
 		},
 		{
-			url:      mustParse("http://github.com/loadimpact/k6/samples/http_get.js"),
+			url:      mustParse("http://go.k6.io/k6/samples/http_get.js"),
 			expected: "http_get.js",
 		},
 		{

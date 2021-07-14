@@ -21,6 +21,7 @@
 package cloud
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -28,19 +29,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/guregu/null.v3"
 
-	"github.com/loadimpact/k6/cloudapi"
-	"github.com/loadimpact/k6/output"
+	"go.k6.io/k6/cloudapi"
+	"go.k6.io/k6/output"
 
-	"github.com/loadimpact/k6/lib"
-	"github.com/loadimpact/k6/lib/consts"
-	"github.com/loadimpact/k6/lib/metrics"
-	"github.com/loadimpact/k6/lib/netext"
-	"github.com/loadimpact/k6/lib/netext/httpext"
-	"github.com/loadimpact/k6/stats"
+	"go.k6.io/k6/lib"
+	"go.k6.io/k6/lib/consts"
+	"go.k6.io/k6/lib/metrics"
+	"go.k6.io/k6/lib/netext"
+	"go.k6.io/k6/lib/netext/httpext"
+	"go.k6.io/k6/stats"
 )
 
 // TestName is the default Load Impact Cloud test name
@@ -67,7 +67,7 @@ type Output struct {
 
 	// TODO: optimize this
 	//
-	// Since the real-time metrics refactoring (https://github.com/loadimpact/k6/pull/678),
+	// Since the real-time metrics refactoring (https://github.com/k6io/k6/pull/678),
 	// we should no longer have to handle metrics that have times long in the past. So instead of a
 	// map, we can probably use a simple slice (or even an array!) as a ring buffer to store the
 	// aggregation buckets. This should save us a some time, since it would make the lookups and WaitPeriod
@@ -80,12 +80,14 @@ type Output struct {
 	aggregationDone    *sync.WaitGroup
 	stopOutput         chan struct{}
 	outputDone         *sync.WaitGroup
+	engineStopFunc     func(error)
 }
 
 // Verify that Output implements the wanted interfaces
 var _ interface {
 	output.WithRunStatusUpdates
 	output.WithThresholds
+	output.WithTestRunStop
 } = &Output{}
 
 // New creates a new cloud output.
@@ -139,12 +141,12 @@ func newOutput(params output.Params) (*Output, error) {
 	}
 
 	if !(conf.MetricPushConcurrency.Int64 > 0) {
-		return nil, errors.Errorf("metrics push concurrency must be a positive number but is %d",
+		return nil, fmt.Errorf("metrics push concurrency must be a positive number but is %d",
 			conf.MetricPushConcurrency.Int64)
 	}
 
 	if !(conf.MaxMetricSamplesPerPackage.Int64 > 0) {
-		return nil, errors.Errorf("metric samples per package must be a positive number but is %d",
+		return nil, fmt.Errorf("metric samples per package must be a positive number but is %d",
 			conf.MaxMetricSamplesPerPackage.Int64)
 	}
 
@@ -320,6 +322,11 @@ func (out *Output) SetThresholds(scriptThresholds map[string]stats.Thresholds) {
 		thresholds[name] = append(thresholds[name], t.Thresholds...)
 	}
 	out.thresholds = thresholds
+}
+
+// SetTestRunStopCallback receives the function that stops the engine on error
+func (out *Output) SetTestRunStopCallback(stopFunc func(error)) {
+	out.engineStopFunc = stopFunc
 }
 
 func useCloudTags(source *httpext.Trail) *httpext.Trail {
@@ -660,6 +667,9 @@ func (out *Output) pushMetrics() {
 		if err != nil {
 			if out.shouldStopSendingMetrics(err) {
 				out.logger.WithError(err).Warn("Stopped sending metrics to cloud due to an error")
+				if out.config.StopOnError.Bool {
+					out.engineStopFunc(err)
+				}
 				close(out.stopSendingMetrics)
 				break
 			}

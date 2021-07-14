@@ -29,10 +29,10 @@ import (
 	"github.com/sirupsen/logrus"
 	"gopkg.in/guregu/null.v3"
 
-	"github.com/loadimpact/k6/lib"
-	"github.com/loadimpact/k6/lib/types"
-	"github.com/loadimpact/k6/stats"
-	"github.com/loadimpact/k6/ui/pb"
+	"go.k6.io/k6/lib"
+	"go.k6.io/k6/lib/types"
+	"go.k6.io/k6/stats"
+	"go.k6.io/k6/ui/pb"
 )
 
 const constantVUsType = "constant-vus"
@@ -176,19 +176,25 @@ func (clv ConstantVUs) Run(parentCtx context.Context, out chan<- stats.SampleCon
 	regDurationDone := regDurationCtx.Done()
 	runIteration := getIterationRunner(clv.executionState, clv.logger)
 
-	activationParams := getVUActivationParams(maxDurationCtx, clv.config.BaseConfig,
-		func(u lib.InitializedVU) {
-			clv.executionState.ReturnVU(u, true)
-			activeVUs.Done()
-		})
+	maxDurationCtx = lib.WithScenarioState(maxDurationCtx, &lib.ScenarioState{
+		Name:       clv.config.Name,
+		Executor:   clv.config.Type,
+		StartTime:  startTime,
+		ProgressFn: progressFn,
+	})
+
+	returnVU := func(u lib.InitializedVU) {
+		clv.executionState.ReturnVU(u, true)
+		activeVUs.Done()
+	}
+
 	handleVU := func(initVU lib.InitializedVU) {
 		ctx, cancel := context.WithCancel(maxDurationCtx)
 		defer cancel()
 
-		newParams := *activationParams
-		newParams.RunContext = ctx
-
-		activeVU := initVU.Activate(&newParams)
+		activeVU := initVU.Activate(
+			getVUActivationParams(ctx, clv.config.BaseConfig, returnVU,
+				clv.nextIterationCounters))
 
 		for {
 			select {

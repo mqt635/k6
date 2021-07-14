@@ -27,9 +27,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/pkg/errors"
-
-	"github.com/loadimpact/k6/lib"
+	"go.k6.io/k6/lib"
 )
 
 type ResultStatus int
@@ -80,7 +78,7 @@ func (c *Client) CreateTestRun(testRun *TestRun) (*CreateTestRunResponse, error)
 	}
 
 	if ctrr.ReferenceID == "" {
-		return nil, errors.Errorf("Failed to get a reference ID")
+		return nil, fmt.Errorf("failed to get a reference ID")
 	}
 
 	return &ctrr, nil

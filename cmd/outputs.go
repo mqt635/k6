@@ -21,7 +21,7 @@
 package cmd
 
 import (
-	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -29,79 +29,33 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 
-	"github.com/loadimpact/k6/lib"
-	"github.com/loadimpact/k6/loader"
-	"github.com/loadimpact/k6/output"
-	"github.com/loadimpact/k6/output/cloud"
-	"github.com/loadimpact/k6/output/json"
-	"github.com/loadimpact/k6/stats"
-	"github.com/loadimpact/k6/stats/csv"
-	"github.com/loadimpact/k6/stats/datadog"
-	"github.com/loadimpact/k6/stats/influxdb"
-	"github.com/loadimpact/k6/stats/statsd"
-
-	"github.com/k6io/xk6-output-kafka/pkg/kafka"
+	"go.k6.io/k6/lib"
+	"go.k6.io/k6/loader"
+	"go.k6.io/k6/output"
+	"go.k6.io/k6/output/cloud"
+	"go.k6.io/k6/output/csv"
+	"go.k6.io/k6/output/influxdb"
+	"go.k6.io/k6/output/json"
+	"go.k6.io/k6/output/statsd"
 )
 
 // TODO: move this to an output sub-module after we get rid of the old collectors?
-//nolint: funlen
 func getAllOutputConstructors() (map[string]func(output.Params) (output.Output, error), error) {
 	// Start with the built-in outputs
 	result := map[string]func(output.Params) (output.Output, error){
-		"json":  json.New,
-		"cloud": cloud.New,
-
-		// TODO: remove all of these
-		"influxdb": func(params output.Params) (output.Output, error) {
-			conf, err := influxdb.GetConsolidatedConfig(params.JSONConfig, params.Environment, params.ConfigArgument)
-			if err != nil {
-				return nil, err
-			}
-			influxc, err := influxdb.New(params.Logger, conf)
-			if err != nil {
-				return nil, err
-			}
-			return newCollectorAdapter(params, influxc), nil
-		},
+		"json":     json.New,
+		"cloud":    cloud.New,
+		"influxdb": influxdb.New,
 		"kafka": func(params output.Params) (output.Output, error) {
-			params.Logger.Warn("The kafka output is deprecated, and will be removed in a future k6 version. " +
-				"Please use the new xk6 kafka output extension instead. " +
-				"It can be found at https://github.com/k6io/xk6-output-kafka.")
-			return kafka.New(params)
+			return nil, errors.New("the kafka output was deprecated in k6 v0.32.0 and removed in k6 v0.34.0, " +
+				"please use the new xk6 kafka output extension instead - https://github.com/k6io/xk6-output-kafka")
 		},
-		"statsd": func(params output.Params) (output.Output, error) {
-			conf, err := statsd.GetConsolidatedConfig(params.JSONConfig, params.Environment)
-			if err != nil {
-				return nil, err
-			}
-			statsdc, err := statsd.New(params.Logger, conf)
-			if err != nil {
-				return nil, err
-			}
-			return newCollectorAdapter(params, statsdc), nil
-		},
+		"statsd": statsd.New,
 		"datadog": func(params output.Params) (output.Output, error) {
-			conf, err := datadog.GetConsolidatedConfig(params.JSONConfig, params.Environment)
-			if err != nil {
-				return nil, err
-			}
-			datadogc, err := datadog.New(params.Logger, conf)
-			if err != nil {
-				return nil, err
-			}
-			return newCollectorAdapter(params, datadogc), nil
+			return nil, errors.New("the datadog output was deprecated in k6 v0.32.0 and removed in k6 v0.34.0, " +
+				"please use the statsd output with env. variable K6_STATSD_ENABLE_TAGS=true instead")
 		},
-		"csv": func(params output.Params) (output.Output, error) {
-			conf, err := csv.GetConsolidatedConfig(params.JSONConfig, params.Environment, params.ConfigArgument)
-			if err != nil {
-				return nil, err
-			}
-			csvc, err := csv.New(params.Logger, params.FS, params.ScriptOptions.SystemTags.Map(), conf)
-			if err != nil {
-				return nil, err
-			}
-			return newCollectorAdapter(params, csvc), nil
-		},
+		"csv": csv.New,
 	}
 
 	exts := output.GetExtensions()
@@ -180,55 +134,4 @@ func parseOutputArgument(s string) (t, arg string) {
 	default:
 		return parts[0], parts[1]
 	}
-}
-
-// TODO: remove this after we transition every collector to the output interface
-
-func newCollectorAdapter(params output.Params, collector lib.Collector) output.Output {
-	return &collectorAdapter{
-		outputType: params.OutputType,
-		collector:  collector,
-		stopCh:     make(chan struct{}),
-	}
-}
-
-// collectorAdapter is a _temporary_ fix until we move all of the old
-// "collectors" to the new output interface
-type collectorAdapter struct {
-	collector    lib.Collector
-	outputType   string
-	runCtx       context.Context
-	runCtxCancel func()
-	stopCh       chan struct{}
-}
-
-func (ca *collectorAdapter) Description() string {
-	link := ca.collector.Link()
-	if link != "" {
-		return fmt.Sprintf("%s (%s)", ca.outputType, link)
-	}
-	return ca.outputType
-}
-
-func (ca *collectorAdapter) Start() error {
-	if err := ca.collector.Init(); err != nil {
-		return err
-	}
-	ca.runCtx, ca.runCtxCancel = context.WithCancel(context.Background())
-	go func() {
-		ca.collector.Run(ca.runCtx)
-		close(ca.stopCh)
-	}()
-	return nil
-}
-
-func (ca *collectorAdapter) AddMetricSamples(samples []stats.SampleContainer) {
-	ca.collector.Collect(samples)
-}
-
-// Stop implements the new output interface.
-func (ca *collectorAdapter) Stop() error {
-	ca.runCtxCancel()
-	<-ca.stopCh
-	return nil
 }

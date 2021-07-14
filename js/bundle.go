@@ -24,21 +24,22 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/url"
 	"runtime"
 
 	"github.com/dop251/goja"
 	"github.com/dop251/goja/parser"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 	"gopkg.in/guregu/null.v3"
 
-	"github.com/loadimpact/k6/js/common"
-	"github.com/loadimpact/k6/js/compiler"
-	"github.com/loadimpact/k6/lib"
-	"github.com/loadimpact/k6/lib/consts"
-	"github.com/loadimpact/k6/loader"
+	"go.k6.io/k6/js/common"
+	"go.k6.io/k6/js/compiler"
+	"go.k6.io/k6/lib"
+	"go.k6.io/k6/lib/consts"
+	"go.k6.io/k6/loader"
 )
 
 // A Bundle is a self-contained bundle of scripts and resources.
@@ -111,7 +112,7 @@ func NewBundle(
 // NewBundleFromArchive creates a new bundle from an lib.Archive.
 func NewBundleFromArchive(logger logrus.FieldLogger, arc *lib.Archive, rtOpts lib.RuntimeOptions) (*Bundle, error) {
 	if arc.Type != "js" {
-		return nil, errors.Errorf("expected bundle type 'js', got '%s'", arc.Type)
+		return nil, fmt.Errorf("expected bundle type 'js', got '%s'", arc.Type)
 	}
 
 	if !rtOpts.CompatibilityMode.Valid {
@@ -235,7 +236,7 @@ func (b *Bundle) getExports(logger logrus.FieldLogger, rt *goja.Runtime, options
 }
 
 // Instantiate creates a new runtime from this bundle.
-func (b *Bundle) Instantiate(logger logrus.FieldLogger, vuID int64) (bi *BundleInstance, instErr error) {
+func (b *Bundle) Instantiate(logger logrus.FieldLogger, vuID uint64) (bi *BundleInstance, instErr error) {
 	// TODO: actually use a real context here, so that the instantiation can be killed
 	// Placeholder for a real context.
 	ctxPtr := new(context.Context)
@@ -282,7 +283,7 @@ func (b *Bundle) Instantiate(logger logrus.FieldLogger, vuID int64) (bi *BundleI
 
 // Instantiates the bundle into an existing runtime. Not public because it also messes with a bunch
 // of other things, will potentially thrash data and makes a mess in it if the operation fails.
-func (b *Bundle) instantiate(logger logrus.FieldLogger, rt *goja.Runtime, init *InitContext, vuID int64) error {
+func (b *Bundle) instantiate(logger logrus.FieldLogger, rt *goja.Runtime, init *InitContext, vuID uint64) error {
 	rt.SetParserOptions(parser.WithDisableSourceMaps)
 	rt.SetFieldNameMapper(common.FieldNameMapper{})
 	rt.SetRandSource(common.NewRandSource())
@@ -308,15 +309,18 @@ func (b *Bundle) instantiate(logger logrus.FieldLogger, rt *goja.Runtime, init *
 	// TODO: get rid of the unused ctxPtr, use a real external context (so we
 	// can interrupt), build the common.InitEnvironment earlier and reuse it
 	initenv := &common.InitEnvironment{
-		SharedObjects: init.sharedObjects,
-		Logger:        logger,
-		FileSystems:   init.filesystems,
-		CWD:           init.pwd,
+		Logger:      logger,
+		FileSystems: init.filesystems,
+		CWD:         init.pwd,
 	}
 	ctx := common.WithInitEnv(context.Background(), initenv)
 	*init.ctxPtr = common.WithRuntime(ctx, rt)
 	unbindInit := common.BindToGlobal(rt, common.Bind(rt, init, init.ctxPtr))
 	if _, err := rt.RunProgram(b.Program); err != nil {
+		var exception *goja.Exception
+		if errors.As(err, &exception) {
+			err = &scriptException{inner: exception}
+		}
 		return err
 	}
 	unbindInit()

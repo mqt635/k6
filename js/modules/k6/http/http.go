@@ -23,15 +23,11 @@ package http
 import (
 	"context"
 
-	"github.com/loadimpact/k6/js/common"
-	"github.com/loadimpact/k6/js/internal/modules"
-	"github.com/loadimpact/k6/lib"
-	"github.com/loadimpact/k6/lib/netext"
+	"go.k6.io/k6/js/common"
+	"go.k6.io/k6/lib"
+	"go.k6.io/k6/lib/netext"
+	"go.k6.io/k6/lib/netext/httpext"
 )
-
-func init() {
-	modules.Register("k6/http", new(GlobalHTTP))
-}
 
 const (
 	HTTP_METHOD_GET     = "GET"
@@ -46,10 +42,13 @@ const (
 // ErrJarForbiddenInInitContext is used when a cookie jar was made in the init context
 var ErrJarForbiddenInInitContext = common.NewInitContextError("Making cookie jars in the init context is not supported")
 
+// New returns a new global module instance
+func New() *GlobalHTTP {
+	return &GlobalHTTP{}
+}
+
 // GlobalHTTP is a global HTTP module for a k6 instance/test run
 type GlobalHTTP struct{}
-
-var _ modules.HasModuleInstancePerVU = new(GlobalHTTP)
 
 // NewModuleInstancePerVU returns an HTTP instance for each VU
 func (g *GlobalHTTP) NewModuleInstancePerVU() interface{} { // this here needs to return interface{}
@@ -101,14 +100,30 @@ type HTTP struct {
 	responseCallback func(int) bool
 }
 
+// XCookieJar creates a new cookie jar object.
 func (*HTTP) XCookieJar(ctx *context.Context) *HTTPCookieJar {
 	return newCookieJar(ctx)
 }
 
+// CookieJar returns the active cookie jar for the current VU.
 func (*HTTP) CookieJar(ctx context.Context) (*HTTPCookieJar, error) {
 	state := lib.GetState(ctx)
 	if state == nil {
 		return nil, ErrJarForbiddenInInitContext
 	}
 	return &HTTPCookieJar{state.CookieJar, &ctx}, nil
+}
+
+// URL creates a new URL from the provided parts
+func (*HTTP) URL(parts []string, pieces ...string) (httpext.URL, error) {
+	var name, urlstr string
+	for i, part := range parts {
+		name += part
+		urlstr += part
+		if i < len(pieces) {
+			name += "${}"
+			urlstr += pieces[i]
+		}
+	}
+	return httpext.NewURL(urlstr, name)
 }

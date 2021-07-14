@@ -1,7 +1,5 @@
 run:
   deadline: 5m
-  skip-files:
-  - "rice-box.go$"
 
 issues:
   # Maximum issues count per one linter. Set to 0 to disable. Default is 50.
@@ -24,6 +22,9 @@ issues:
        - gocognit
        - funlen
        - lll
+   - linters:
+     - paralleltest # false positive: https://github.com/kunwardeep/paralleltest/issues/8.
+     text: "does not use range value in test Run"
 
   exclude:
    #TODO: remove this exclusion after https://github.com/golang/lint/issues/381
@@ -58,6 +59,7 @@ linters-settings:
 linters:
   enable-all: true
   disable:
+  - nlreturn
   - gci
   - gochecknoinits
   - godot
@@ -67,6 +69,11 @@ linters:
   - wsl
   - gomnd
   - goerr113 # most of the errors here are meant for humans
-  - nlreturn
   - goheader
+  - exhaustivestruct
+  - thelper
+  - maligned # replaced by govet 'fieldalignment'
+  - interfacer # deprecated
+  - scopelint # deprecated, replaced by exportloopref
+  - wrapcheck # a little bit too much for k6, maybe after https://github.com/tomarrell/wrapcheck/issues/2 is fixed
   fast: false

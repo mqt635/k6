@@ -29,18 +29,12 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"time"
 
-	"github.com/pkg/errors"
-
-	"github.com/loadimpact/k6/js/common"
-	"github.com/loadimpact/k6/js/internal/modules"
+	"go.k6.io/k6/js/common"
 )
-
-func init() {
-	modules.Register("k6/crypto/x509", New())
-}
 
 // X509 certificate functionality
 type X509 struct{}
@@ -145,7 +139,7 @@ func parseCertificate(encoded []byte) (*x509.Certificate, error) {
 	}
 	parsed, err := x509.ParseCertificate(decoded.Bytes)
 	if err != nil {
-		err = errors.Wrap(err, "failed to parse certificate")
+		err = fmt.Errorf("failed to parse certificate: %w", err)
 		return nil, err
 	}
 	return parsed, nil
@@ -224,7 +218,7 @@ func iso8601(value time.Time) string {
 }
 
 func makeRdns(names []pkix.AttributeTypeAndValue) []RDN {
-	var result = make([]RDN, len(names))
+	result := make([]RDN, len(names))
 	for i, name := range names {
 		result[i] = makeRdn(name)
 	}

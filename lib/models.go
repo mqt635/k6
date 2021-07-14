@@ -24,15 +24,15 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/pkg/errors"
 	"gopkg.in/guregu/null.v3"
 
-	"github.com/loadimpact/k6/lib/types"
+	"go.k6.io/k6/lib/types"
 )
 
 // Separator for group IDs.

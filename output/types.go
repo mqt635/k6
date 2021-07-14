@@ -25,10 +25,11 @@ import (
 	"io"
 	"net/url"
 
-	"github.com/loadimpact/k6/lib"
-	"github.com/loadimpact/k6/stats"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
+
+	"go.k6.io/k6/lib"
+	"go.k6.io/k6/stats"
 )
 
 // Params contains all possible constructor parameters an output may need.
@@ -80,8 +81,14 @@ type WithThresholds interface {
 	SetThresholds(map[string]stats.Thresholds)
 }
 
-// TODO: add some way for outputs to report mid-test errors and potentially
-// abort the whole test run
+// WithTestRunStop is an output that can stop the Engine mid-test, interrupting
+// the whole test run execution if some internal condition occurs, completely
+// independently from the thresholds. It requires a callback function which
+// expects an error and triggers the Engine to stop.
+type WithTestRunStop interface {
+	Output
+	SetTestRunStopCallback(func(error))
+}
 
 // WithRunStatusUpdates means the output can receive test run status updates.
 type WithRunStatusUpdates interface {
