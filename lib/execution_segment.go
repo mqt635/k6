@@ -1,23 +1,3 @@
-/*
- *
- * k6 - a next-generation load testing tool
- * Copyright (C) 2019 Load Impact
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- */
-
 package lib
 
 import (
@@ -68,13 +48,13 @@ var (
 // fully-initialized and usable execution segment.
 func NewExecutionSegment(from, to *big.Rat) (*ExecutionSegment, error) {
 	if from.Cmp(zeroRat) < 0 {
-		return nil, fmt.Errorf("segment start value should be at least 0 but was %s", from.FloatString(2))
+		return nil, fmt.Errorf("segment start value must be at least 0 but was %s", from.FloatString(2))
 	}
 	if from.Cmp(to) >= 0 {
-		return nil, fmt.Errorf("segment start(%s) should be less than its end(%s)", from.FloatString(2), to.FloatString(2))
+		return nil, fmt.Errorf("segment start(%s) must be less than its end(%s)", from.FloatString(2), to.FloatString(2))
 	}
 	if to.Cmp(oneRat) > 0 {
-		return nil, fmt.Errorf("segment end value shouldn't be more than 1 but was %s", to.FloatString(2))
+		return nil, fmt.Errorf("segment end value can't be more than 1 but was %s", to.FloatString(2))
 	}
 	return newExecutionSegment(from, to), nil
 }
@@ -91,8 +71,8 @@ func newExecutionSegment(from, to *big.Rat) *ExecutionSegment {
 // stringToRat is a helper function that tries to convert a string to a rational
 // number while allowing percentage, decimal, and fraction values.
 func stringToRat(s string) (*big.Rat, error) {
-	if strings.HasSuffix(s, "%") {
-		num, ok := new(big.Int).SetString(strings.TrimSuffix(s, "%"), 10)
+	if before, ok := strings.CutSuffix(s, "%"); ok {
+		num, ok := new(big.Int).SetString(before, 10)
 		if !ok {
 			return nil, fmt.Errorf("'%s' is not a valid percentage", s)
 		}
@@ -114,9 +94,13 @@ func stringToRat(s string) (*big.Rat, error) {
 // quickly running an arbitrarily scaled-down version of a test.
 //
 // The parsing logic is that values with a colon, i.e. ':', are full segments:
-//  `1/2:3/4`, `0.5:0.75`, `50%:75%`, and even `2/4:75%` should be (1/2, 3/4]
+//
+//	`1/2:3/4`, `0.5:0.75`, `50%:75%`, and even `2/4:75%` should be (1/2, 3/4]
+//
 // And values without a colon are the end of a first segment:
-//  `20%`, `0.2`,  and `1/5` should be converted to (0, 1/5]
+//
+//	`20%`, `0.2`,  and `1/5` should be converted to (0, 1/5]
+//
 // empty values should probably be treated as "1", i.e. the whole execution
 func NewExecutionSegmentFromString(toStr string) (result *ExecutionSegment, err error) {
 	from := zeroRat
@@ -124,9 +108,9 @@ func NewExecutionSegmentFromString(toStr string) (result *ExecutionSegment, err 
 		toStr = "1" // an empty string means a full 0:1 execution segment
 	}
 	if strings.ContainsRune(toStr, ':') {
-		fromToStr := strings.SplitN(toStr, ":", 2)
-		toStr = fromToStr[1]
-		if from, err = stringToRat(fromToStr[0]); err != nil {
+		var fromStr string
+		fromStr, toStr, _ = strings.Cut(toStr, ":")
+		if from, err = stringToRat(fromStr); err != nil {
 			return nil, err
 		}
 	}
@@ -181,7 +165,7 @@ func (es *ExecutionSegment) FloatLength() float64 {
 // equal consecutive execution sub-segments.
 func (es *ExecutionSegment) Split(numParts int64) ([]*ExecutionSegment, error) {
 	if numParts < 1 {
-		return nil, fmt.Errorf("the number of parts should be at least 1, %d received", numParts)
+		return nil, fmt.Errorf("the number of parts must be at least 1, %d received", numParts)
 	}
 
 	from, to := zeroRat, oneRat
@@ -193,7 +177,7 @@ func (es *ExecutionSegment) Split(numParts int64) ([]*ExecutionSegment, error) {
 	increment.Denom().Mul(increment.Denom(), big.NewInt(numParts))
 
 	results := make([]*ExecutionSegment, numParts)
-	for i := int64(0); i < numParts; i++ {
+	for i := range numParts {
 		segmentTo := new(big.Rat).Add(from, increment)
 		segment, err := NewExecutionSegment(from, segmentTo)
 		if err != nil {
@@ -230,8 +214,9 @@ func (es *ExecutionSegment) Equal(other *ExecutionSegment) bool {
 // (0:1/2], then a.SubSegment(b) will return a new segment (1/2, 3/4].
 //
 // The basic formula for c = a.SubSegment(b) is:
-//    c.from = a.from + b.from * (a.to - a.from)
-//    c.to = c.from + (b.to - b.from) * (a.to - a.from)
+//
+//	c.from = a.from + b.from * (a.to - a.from)
+//	c.to = c.from + (b.to - b.from) * (a.to - a.from)
 func (es *ExecutionSegment) SubSegment(child *ExecutionSegment) *ExecutionSegment {
 	if child == nil {
 		return es // 100% sub-segment is the original segment
@@ -323,7 +308,7 @@ func NewExecutionSegmentSequence(segments ...*ExecutionSegment) (ExecutionSegmen
 		for i, segment := range segments[1:] {
 			if segment.from.Cmp(to) != 0 {
 				return nil, fmt.Errorf(
-					"the start value %s of segment #%d should be equal to the end value of the previous one, but it is %s",
+					"the start value %s of segment #%d must be equal to the end value of the previous one, but it is %s",
 					segment.from, i+1, to,
 				)
 			}
@@ -432,7 +417,7 @@ func gcd(a, b int64) int64 {
 // IsFull returns whether the sequences is full, that is, whether it starts at 0
 // and ends at 1. Use GetFilledExecutionSegmentSequence() to get a full sequence.
 func (ess ExecutionSegmentSequence) IsFull() bool {
-	return ess != nil && len(ess) != 0 && ess[0].from.Cmp(zeroRat) == 0 && ess[len(ess)-1].to.Cmp(oneRat) == 0
+	return len(ess) != 0 && ess[0].from.Cmp(zeroRat) == 0 && ess[len(ess)-1].to.Cmp(oneRat) == 0
 }
 
 // FindSegmentPosition returns the index of the supplied execution segment in
@@ -570,7 +555,7 @@ func NewExecutionSegmentSequenceWrapper(ess ExecutionSegmentSequence) *Execution
 			offsets[index] = append(offsets[index], offsets[index][0]+lcd-iteration)
 		}
 	}
-	for i := int64(0); i < lcd; i++ {
+	for i := range lcd {
 		for sortedIndex, chosenCount := range chosenCounts {
 			num := chosenCount * lcd
 			denom := sortedNormalizedIndexes[sortedIndex].normNumerator
@@ -604,12 +589,12 @@ func (essw *ExecutionSegmentSequenceWrapper) ScaleInt64(segmentIndex int, value 
 
 // GetStripedOffsets returns the stripped offsets for the given segment
 // the returned values are as follows in order:
-// - start: the first value that is for the segment
-// - offsets: a list of offsets from the previous value for the segment. This are only the offsets
-//            to from the start to the next start if we chunk the elements we are going to strip
-//            into lcd sized chunks
-// - lcd: the LCD of the lengths of all segments in the sequence. This is also the number of
-//        elements after which the algorithm starts to loop and give the same values
+//   - start: the first value that is for the segment
+//   - offsets: a list of offsets from the previous value for the segment. This are only the offsets
+//     to from the start to the next start if we chunk the elements we are going to strip
+//     into lcd sized chunks
+//   - lcd: the LCD of the lengths of all segments in the sequence. This is also the number of
+//     elements after which the algorithm starts to loop and give the same values
 func (essw *ExecutionSegmentSequenceWrapper) GetStripedOffsets(segmentIndex int) (int64, []int64, int64) {
 	offsets := essw.offsets[segmentIndex]
 	return offsets[0], offsets[1:], essw.lcd
@@ -677,7 +662,50 @@ func (essw *ExecutionSegmentSequenceWrapper) GetNewExecutionSegmentSequenceFromV
 // ExecutionTuple is the combination of an ExecutionSegmentSequence(Wrapper) and
 // a specific ExecutionSegment from it. It gives easy access to the efficient
 // scaling and striping algorithms for that specific segment, since the results
-// are cached in the sequence wrapper.
+// are cached in the sequence wrapper. It is also the basis for the
+// SegmentedIndex type below, which is the actual implementation of a segmented
+// (striped) iterator, usable both for segmenting actual iterations and for
+// partitioning data between multiple instances.
+//
+// For example, let's try to segment a load test in 3 unequal parts: 50%, 25%
+// and 25% (so the ExecutionSegmentSequence will contain these segments: 0:1/2,
+// 1/2:3/4, 3/4:1). The building blocks that k6 needs for distributed execution
+// are segmented (non-overlapping) iterators and proportionally dividing integer
+// numbers as fairly as possible between multiple segments in a stable manner.
+//
+// The segmented iterators (i.e. SegmentedIndex values below) will be like this:
+//
+//	Normal iterator:              0   1   2   3   4   5   6   7   8   9   10  11 ...
+//	Instance 1 (0:1/2) iterator:  0       2       4       6       8       10     ...
+//	Instance 2 (1/2:3/4) iterator:    1               5               9          ...
+//	Instance 2 (3/4:1) iterator:              3               7               11 ...
+//
+// See how every instance has its own uniqe non-overlapping iterator, but when
+// we combine all of them, we cover every possible value in the original one.
+//
+// We also can use this property to scale integer numbers proportionally, as
+// fairly as possible, between the instances, like this:
+//
+//	Global int value to scale:    1   2   3   4   5   6   7   8   9   10  11  12 ...
+//	Calling ScaleInt64():
+//	- Instance 1 (0:1/2) value:   1   1   2   2   3   3   4   4   5   5   6   6  ...
+//	- Instance 2 (1/2:3/4) value: 0   1   1   1   1   2   2   2   2   3   3   3  ...
+//	- Instance 2 (3/4:1) value:   0   0   0   1   1   1   1   2   2   2   2   3  ...
+//
+// Notice how the sum of the per-instance values is always equal to the global
+// value - this is what ExecutionTuple.ScaleInt64() does. Also compare both
+// tables (their positions match), see how we only increment the value for a
+// particular instance when we would have cycled the iterator on that step.
+//
+// This also makes the scaling stable, in contrast to ExecutionSegment.Scale().
+// Scaled values will only ever increase, since we just increment them in a
+// specific order between instances. There will never be a situation where
+// `ScaleInt64(i)` is less than `ScaleInt64(i+n)` for any positive n!
+//
+// The algorithm that calculates the offsets and everything that's necessary to
+// have these segmented iterators is in NewExecutionSegmentSequenceWrapper().
+// The ExecutionTuple simply exposes them efficiently for a single segment of
+// the sequence, so it's the thing that most users will probably need.
 type ExecutionTuple struct { // TODO rename? make fields private and have getter methods?
 	Sequence     *ExecutionSegmentSequenceWrapper
 	Segment      *ExecutionSegment
@@ -732,8 +760,11 @@ func (et *ExecutionTuple) GetNewExecutionTupleFromValue(value int64) (*Execution
 }
 
 // SegmentedIndex is an iterator that returns both the scaled and the unscaled
-// sequential values according to the given ExecutionTuple. It is not thread-safe,
-// concurrent access has to be externally synchronized.
+// sequential values according to the given ExecutionTuple. It is not
+// thread-safe, concurrent access has to be externally synchronized.
+//
+// See the documentation for ExecutionTuple above for a visual explanation of
+// how this iterator actually works.
 type SegmentedIndex struct {
 	start, lcd       int64
 	offsets          []int64

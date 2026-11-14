@@ -1,23 +1,3 @@
-/*
- *
- * k6 - a next-generation load testing tool
- * Copyright (C) 2019 Load Impact
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- */
-
 package executor
 
 import (
@@ -29,11 +9,10 @@ import (
 	"github.com/sirupsen/logrus"
 	"gopkg.in/guregu/null.v3"
 
-	"go.k6.io/k6/lib"
-	"go.k6.io/k6/lib/metrics"
-	"go.k6.io/k6/lib/types"
-	"go.k6.io/k6/stats"
-	"go.k6.io/k6/ui/pb"
+	"go.k6.io/k6/v2/internal/ui/pb"
+	"go.k6.io/k6/v2/lib"
+	"go.k6.io/k6/v2/lib/types"
+	"go.k6.io/k6/v2/metrics"
 )
 
 const constantVUsType = "constant-vus"
@@ -73,7 +52,7 @@ var _ lib.ExecutorConfig = &ConstantVUsConfig{}
 
 // GetVUs returns the scaled VUs for the executor.
 func (clvc ConstantVUsConfig) GetVUs(et *lib.ExecutionTuple) int64 {
-	return et.Segment.Scale(clvc.VUs.Int64)
+	return et.ScaleInt64(clvc.VUs.Int64)
 }
 
 // GetDescription returns a human-readable description of the executor options
@@ -86,14 +65,14 @@ func (clvc ConstantVUsConfig) GetDescription(et *lib.ExecutionTuple) string {
 func (clvc ConstantVUsConfig) Validate() []error {
 	errors := clvc.BaseConfig.Validate()
 	if clvc.VUs.Int64 <= 0 {
-		errors = append(errors, fmt.Errorf("the number of VUs should be more than 0"))
+		errors = append(errors, fmt.Errorf("the number of VUs must be more than 0"))
 	}
 
 	if !clvc.Duration.Valid {
 		errors = append(errors, fmt.Errorf("the duration is unspecified"))
-	} else if time.Duration(clvc.Duration.Duration) < minDuration {
+	} else if clvc.Duration.TimeDuration() < minDuration {
 		errors = append(errors, fmt.Errorf(
-			"the duration should be at least %s, but is %s", minDuration, clvc.Duration,
+			"the duration must be at least %s, but is %s", minDuration, clvc.Duration,
 		))
 	}
 
@@ -109,10 +88,10 @@ func (clvc ConstantVUsConfig) GetExecutionRequirements(et *lib.ExecutionTuple) [
 	return []lib.ExecutionStep{
 		{
 			TimeOffset: 0,
-			PlannedVUs: uint64(clvc.GetVUs(et)),
+			PlannedVUs: uint64(clvc.GetVUs(et)), //nolint:gosec
 		},
 		{
-			TimeOffset: time.Duration(clvc.Duration.Duration + clvc.GracefulStop.Duration),
+			TimeOffset: clvc.Duration.TimeDuration() + clvc.GracefulStop.TimeDuration(),
 			PlannedVUs: 0,
 		},
 	}
@@ -143,15 +122,18 @@ var _ lib.Executor = &ConstantVUs{}
 
 // Run constantly loops through as many iterations as possible on a fixed number
 // of VUs for the specified duration.
-func (clv ConstantVUs) Run(
-	parentCtx context.Context, out chan<- stats.SampleContainer, _ *metrics.BuiltinMetrics,
-) (err error) {
+func (clv ConstantVUs) Run(parentCtx context.Context, _ chan<- metrics.SampleContainer) (err error) {
 	numVUs := clv.config.GetVUs(clv.executionState.ExecutionTuple)
-	duration := time.Duration(clv.config.Duration.Duration)
+	duration := clv.config.Duration.TimeDuration()
 	gracefulStop := clv.config.GetGracefulStop()
 
-	startTime, maxDurationCtx, regDurationCtx, cancel := getDurationContexts(parentCtx, duration, gracefulStop)
-	defer cancel()
+	waitOnProgressChannel := make(chan struct{})
+	startTime, maxDurationCtx, regDurationCtx, cancel, regCancel := getDurationContexts(parentCtx, duration, gracefulStop)
+	defer func() {
+		cancel()
+		regCancel()
+		<-waitOnProgressChannel
+	}()
 
 	// Make sure the log and the progress bar have accurate information
 	clv.logger.WithFields(
@@ -170,7 +152,17 @@ func (clv ConstantVUs) Run(
 		return float64(spent) / float64(duration), right
 	}
 	clv.progress.Modify(pb.WithProgress(progressFn))
-	go trackProgress(parentCtx, maxDurationCtx, regDurationCtx, clv, progressFn)
+	maxDurationCtx = lib.WithScenarioState(maxDurationCtx, &lib.ScenarioState{
+		Name:       clv.config.Name,
+		Executor:   clv.config.Type,
+		StartTime:  startTime,
+		ProgressFn: progressFn,
+	})
+
+	go func() {
+		trackProgress(parentCtx, maxDurationCtx, regDurationCtx, clv, progressFn)
+		close(waitOnProgressChannel)
+	}()
 
 	// Actually schedule the VUs and iterations...
 	activeVUs := &sync.WaitGroup{}
@@ -178,13 +170,6 @@ func (clv ConstantVUs) Run(
 
 	regDurationDone := regDurationCtx.Done()
 	runIteration := getIterationRunner(clv.executionState, clv.logger)
-
-	maxDurationCtx = lib.WithScenarioState(maxDurationCtx, &lib.ScenarioState{
-		Name:       clv.config.Name,
-		Executor:   clv.config.Type,
-		StartTime:  startTime,
-		ProgressFn: progressFn,
-	})
 
 	returnVU := func(u lib.InitializedVU) {
 		clv.executionState.ReturnVU(u, true)
@@ -196,21 +181,19 @@ func (clv ConstantVUs) Run(
 		defer cancel()
 
 		activeVU := initVU.Activate(
-			getVUActivationParams(ctx, clv.config.BaseConfig, returnVU,
-				clv.nextIterationCounters))
+			getVUActivationParams(ctx, clv.config.BaseConfig, returnVU, clv.nextIterationCounters))
 
 		for {
 			select {
 			case <-regDurationDone:
 				return // don't make more iterations
-			default:
-				// continue looping
+			default: // continue looping
 			}
 			runIteration(maxDurationCtx, activeVU)
 		}
 	}
 
-	for i := int64(0); i < numVUs; i++ {
+	for range numVUs {
 		initVU, err := clv.executionState.GetPlannedVU(clv.logger, true)
 		if err != nil {
 			cancel()

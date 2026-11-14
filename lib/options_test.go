@@ -1,75 +1,59 @@
-/*
- *
- * k6 - a next-generation load testing tool
- * Copyright (C) 2016 Load Impact
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- */
-
 package lib
 
 import (
 	"crypto/tls"
 	"encoding/json"
-	"fmt"
 	"net"
 	"reflect"
 	"testing"
 	"time"
 
-	"github.com/kelseyhightower/envconfig"
+	"github.com/mstoykov/envconfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/guregu/null.v3"
 
-	"go.k6.io/k6/lib/testutils"
-	"go.k6.io/k6/lib/types"
-	"go.k6.io/k6/stats"
+	"go.k6.io/k6/v2/lib/types"
+	"go.k6.io/k6/v2/metrics"
 )
 
 func TestOptions(t *testing.T) {
+	t.Parallel()
 	t.Run("Paused", func(t *testing.T) {
+		t.Parallel()
 		opts := Options{}.Apply(Options{Paused: null.BoolFrom(true)})
 		assert.True(t, opts.Paused.Valid)
 		assert.True(t, opts.Paused.Bool)
 	})
 	t.Run("VUs", func(t *testing.T) {
+		t.Parallel()
 		opts := Options{}.Apply(Options{VUs: null.IntFrom(12345)})
 		assert.True(t, opts.VUs.Valid)
 		assert.Equal(t, int64(12345), opts.VUs.Int64)
 	})
 	t.Run("Duration", func(t *testing.T) {
+		t.Parallel()
 		opts := Options{}.Apply(Options{Duration: types.NullDurationFrom(2 * time.Minute)})
 		assert.True(t, opts.Duration.Valid)
 		assert.Equal(t, "2m0s", opts.Duration.String())
 	})
 	t.Run("Iterations", func(t *testing.T) {
+		t.Parallel()
 		opts := Options{}.Apply(Options{Iterations: null.IntFrom(1234)})
 		assert.True(t, opts.Iterations.Valid)
 		assert.Equal(t, int64(1234), opts.Iterations.Int64)
 	})
 	t.Run("Stages", func(t *testing.T) {
+		t.Parallel()
 		opts := Options{}.Apply(Options{Stages: []Stage{
 			{Duration: types.NullDurationFrom(1 * time.Second), Target: null.IntFrom(10)},
 			{Duration: types.NullDurationFrom(2 * time.Second), Target: null.IntFrom(20)},
 		}})
 		assert.NotNil(t, opts.Stages)
 		assert.Len(t, opts.Stages, 2)
-		assert.Equal(t, 1*time.Second, time.Duration(opts.Stages[0].Duration.Duration))
+		assert.Equal(t, 1*time.Second, opts.Stages[0].Duration.TimeDuration())
 		assert.Equal(t, int64(10), opts.Stages[0].Target.Int64)
-		assert.Equal(t, 2*time.Second, time.Duration(opts.Stages[1].Duration.Duration))
+		assert.Equal(t, 2*time.Second, opts.Stages[1].Duration.TimeDuration())
 		assert.Equal(t, int64(20), opts.Stages[1].Target.Int64)
 
 		emptyStages := []Stage{}
@@ -86,59 +70,77 @@ func TestOptions(t *testing.T) {
 	})
 	// Execution overwriting is tested by the config consolidation test in cmd
 	t.Run("RPS", func(t *testing.T) {
+		t.Parallel()
 		opts := Options{}.Apply(Options{RPS: null.IntFrom(12345)})
 		assert.True(t, opts.RPS.Valid)
 		assert.Equal(t, int64(12345), opts.RPS.Int64)
 	})
 	t.Run("MaxRedirects", func(t *testing.T) {
+		t.Parallel()
 		opts := Options{}.Apply(Options{MaxRedirects: null.IntFrom(12345)})
 		assert.True(t, opts.MaxRedirects.Valid)
 		assert.Equal(t, int64(12345), opts.MaxRedirects.Int64)
 	})
 	t.Run("UserAgent", func(t *testing.T) {
+		t.Parallel()
 		opts := Options{}.Apply(Options{UserAgent: null.StringFrom("foo")})
 		assert.True(t, opts.UserAgent.Valid)
 		assert.Equal(t, "foo", opts.UserAgent.String)
 	})
 	t.Run("Batch", func(t *testing.T) {
+		t.Parallel()
 		opts := Options{}.Apply(Options{Batch: null.IntFrom(12345)})
 		assert.True(t, opts.Batch.Valid)
 		assert.Equal(t, int64(12345), opts.Batch.Int64)
 	})
 	t.Run("BatchPerHost", func(t *testing.T) {
+		t.Parallel()
 		opts := Options{}.Apply(Options{BatchPerHost: null.IntFrom(12345)})
 		assert.True(t, opts.BatchPerHost.Valid)
 		assert.Equal(t, int64(12345), opts.BatchPerHost.Int64)
 	})
 	t.Run("HTTPDebug", func(t *testing.T) {
+		t.Parallel()
 		opts := Options{}.Apply(Options{HTTPDebug: null.StringFrom("foo")})
 		assert.True(t, opts.HTTPDebug.Valid)
 		assert.Equal(t, "foo", opts.HTTPDebug.String)
 	})
+	t.Run("HTTPDebugRedact", func(t *testing.T) {
+		t.Parallel()
+		opts := Options{}.Apply(Options{HTTPDebugRedact: null.BoolFrom(true)})
+		assert.True(t, opts.HTTPDebugRedact.Valid)
+		assert.True(t, opts.HTTPDebugRedact.Bool)
+	})
 	t.Run("InsecureSkipTLSVerify", func(t *testing.T) {
+		t.Parallel()
 		opts := Options{}.Apply(Options{InsecureSkipTLSVerify: null.BoolFrom(true)})
 		assert.True(t, opts.InsecureSkipTLSVerify.Valid)
 		assert.True(t, opts.InsecureSkipTLSVerify.Bool)
 	})
 	t.Run("TLSCipherSuites", func(t *testing.T) {
+		t.Parallel()
 		for suiteName, suiteID := range SupportedTLSCipherSuites {
 			t.Run(suiteName, func(t *testing.T) {
+				t.Parallel()
 				opts := Options{}.Apply(Options{TLSCipherSuites: &TLSCipherSuites{suiteID}})
 
 				assert.NotNil(t, opts.TLSCipherSuites)
-				assert.Len(t, *(opts.TLSCipherSuites), 1)
+				assert.Len(t, *opts.TLSCipherSuites, 1)
 				assert.Equal(t, suiteID, (*opts.TLSCipherSuites)[0])
 			})
 		}
 
 		t.Run("JSON", func(t *testing.T) {
+			t.Parallel()
 			t.Run("String", func(t *testing.T) {
+				t.Parallel()
 				var opts Options
 				jsonStr := `{"tlsCipherSuites":["TLS_ECDHE_RSA_WITH_RC4_128_SHA"]}`
 				assert.NoError(t, json.Unmarshal([]byte(jsonStr), &opts))
 				assert.Equal(t, &TLSCipherSuites{tls.TLS_ECDHE_RSA_WITH_RC4_128_SHA}, opts.TLSCipherSuites)
 
 				t.Run("Roundtrip", func(t *testing.T) {
+					t.Parallel()
 					data, err := json.Marshal(opts.TLSCipherSuites)
 					assert.NoError(t, err)
 					assert.Equal(t, `["TLS_ECDHE_RSA_WITH_RC4_128_SHA"]`, string(data))
@@ -147,12 +149,26 @@ func TestOptions(t *testing.T) {
 					assert.Equal(t, &vers2, opts.TLSCipherSuites)
 				})
 			})
+			t.Run("Standard ChaCha20 names", func(t *testing.T) {
+				t.Parallel()
+				var opts Options
+				jsonStr := `{"tlsCipherSuites":[` +
+					`"TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",` +
+					`"TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256"]}`
+				assert.NoError(t, json.Unmarshal([]byte(jsonStr), &opts))
+				assert.Equal(t, &TLSCipherSuites{
+					tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+					tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+				}, opts.TLSCipherSuites)
+			})
 			t.Run("Not a string", func(t *testing.T) {
+				t.Parallel()
 				var opts Options
 				jsonStr := `{"tlsCipherSuites":[1.2]}`
 				assert.Error(t, json.Unmarshal([]byte(jsonStr), &opts))
 			})
 			t.Run("Unknown cipher", func(t *testing.T) {
+				t.Parallel()
 				var opts Options
 				jsonStr := `{"tlsCipherSuites":["foo"]}`
 				assert.Error(t, json.Unmarshal([]byte(jsonStr), &opts))
@@ -160,15 +176,18 @@ func TestOptions(t *testing.T) {
 		})
 	})
 	t.Run("TLSVersion", func(t *testing.T) {
-		versions := TLSVersions{Min: tls.VersionSSL30, Max: tls.VersionTLS12}
+		t.Parallel()
+		versions := TLSVersions{Min: tls.VersionSSL30, Max: tls.VersionTLS12} //nolint:staticcheck
 		opts := Options{}.Apply(Options{TLSVersion: &versions})
 
 		assert.NotNil(t, opts.TLSVersion)
-		assert.Equal(t, opts.TLSVersion.Min, TLSVersion(tls.VersionSSL30))
-		assert.Equal(t, opts.TLSVersion.Max, TLSVersion(tls.VersionTLS12))
+		assert.Equal(t, TLSVersion(tls.VersionSSL30), opts.TLSVersion.Min) //nolint:staticcheck
+		assert.Equal(t, TLSVersion(tls.VersionTLS12), opts.TLSVersion.Max)
 
 		t.Run("JSON", func(t *testing.T) {
+			t.Parallel()
 			t.Run("Object", func(t *testing.T) {
+				t.Parallel()
 				var opts Options
 				jsonStr := `{"tlsVersion":{"min":"tls1.0","max":"tls1.2"}}`
 				assert.NoError(t, json.Unmarshal([]byte(jsonStr), &opts))
@@ -178,6 +197,7 @@ func TestOptions(t *testing.T) {
 				}, opts.TLSVersion)
 
 				t.Run("Roundtrip", func(t *testing.T) {
+					t.Parallel()
 					data, err := json.Marshal(opts.TLSVersion)
 					assert.NoError(t, err)
 					assert.Equal(t, `{"min":"tls1.0","max":"tls1.2"}`, string(data))
@@ -187,6 +207,7 @@ func TestOptions(t *testing.T) {
 				})
 			})
 			t.Run("String", func(t *testing.T) {
+				t.Parallel()
 				var opts Options
 				jsonStr := `{"tlsVersion":"tls1.2"}`
 				assert.NoError(t, json.Unmarshal([]byte(jsonStr), &opts))
@@ -196,17 +217,20 @@ func TestOptions(t *testing.T) {
 				}, opts.TLSVersion)
 			})
 			t.Run("Blank", func(t *testing.T) {
+				t.Parallel()
 				var opts Options
 				jsonStr := `{"tlsVersion":""}`
 				assert.NoError(t, json.Unmarshal([]byte(jsonStr), &opts))
 				assert.Equal(t, &TLSVersions{}, opts.TLSVersion)
 			})
 			t.Run("Not a string", func(t *testing.T) {
+				t.Parallel()
 				var opts Options
 				jsonStr := `{"tlsVersion":1.2}`
 				assert.Error(t, json.Unmarshal([]byte(jsonStr), &opts))
 			})
 			t.Run("Unsupported version", func(t *testing.T) {
+				t.Parallel()
 				var opts Options
 				jsonStr := `{"tlsVersion":"-1"}`
 				assert.Error(t, json.Unmarshal([]byte(jsonStr), &opts))
@@ -217,6 +241,7 @@ func TestOptions(t *testing.T) {
 		})
 	})
 	t.Run("TLSAuth", func(t *testing.T) {
+		t.Parallel()
 		tlsAuth := []*TLSAuth{
 			{TLSAuthFields{
 				Domains: []string{"example.com", "*.example.com"},
@@ -261,49 +286,158 @@ func TestOptions(t *testing.T) {
 		assert.Equal(t, tlsAuth, opts.TLSAuth)
 
 		t.Run("Roundtrip", func(t *testing.T) {
+			t.Parallel()
 			optsData, err := json.Marshal(opts)
 			assert.NoError(t, err)
 
 			var opts2 Options
 			assert.NoError(t, json.Unmarshal(optsData, &opts2))
-			if assert.Len(t, opts2.TLSAuth, len(opts.TLSAuth)) {
-				for i := 0; i < len(opts2.TLSAuth); i++ {
-					assert.Equal(t, opts.TLSAuth[i].TLSAuthFields, opts2.TLSAuth[i].TLSAuthFields)
-					cert, err := opts2.TLSAuth[i].Certificate()
-					assert.NoError(t, err)
-					assert.NotNil(t, cert)
-				}
+			require.Len(t, opts2.TLSAuth, len(opts.TLSAuth))
+			for i := 0; i < len(opts2.TLSAuth); i++ {
+				assert.Equal(t, opts.TLSAuth[i].TLSAuthFields, opts2.TLSAuth[i].TLSAuthFields)
+				cert, err := opts2.TLSAuth[i].Certificate()
+				assert.NoError(t, err)
+				assert.NotNil(t, cert)
 			}
 		})
 
 		t.Run("Invalid JSON", func(t *testing.T) {
+			t.Parallel()
 			var opts Options
 			jsonStr := `{"tlsAuth":["invalid"]}`
 			assert.Error(t, json.Unmarshal([]byte(jsonStr), &opts))
 		})
 
 		t.Run("Certificate error", func(t *testing.T) {
+			t.Parallel()
 			var opts Options
 			jsonStr := `{"tlsAuth":[{"Cert":""}]}`
 			assert.Error(t, json.Unmarshal([]byte(jsonStr), &opts))
 		})
 	})
+	t.Run("TLSAuth with", func(t *testing.T) {
+		t.Parallel()
+		domains := []string{"example.com", "*.example.com"}
+		cert := "-----BEGIN CERTIFICATE-----\n" +
+			"MIIBoTCCAUegAwIBAgIUQl0J1Gkd6U2NIMwMDnpfH8c1myEwCgYIKoZIzj0EAwIw\n" +
+			"EDEOMAwGA1UEAxMFTXkgQ0EwHhcNMTcwODE1MTYxODAwWhcNMTgwODE1MTYxODAw\n" +
+			"WjAQMQ4wDAYDVQQDEwV1c2VyMTBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABLaf\n" +
+			"xEOmBHkzbqd9/0VZX/39qO2yQq2Gz5faRdvy38kuLMCV+9HYrfMx6GYCZzTUIq6h\n" +
+			"8QXOrlgYTixuUVfhJNWjfzB9MA4GA1UdDwEB/wQEAwIFoDAdBgNVHSUEFjAUBggr\n" +
+			"BgEFBQcDAQYIKwYBBQUHAwIwDAYDVR0TAQH/BAIwADAdBgNVHQ4EFgQUxmQiq5K3\n" +
+			"KUnVME945Byt3Ysvkh8wHwYDVR0jBBgwFoAU3qEhcpRgpsqo9V+LFns9a+oZIYww\n" +
+			"CgYIKoZIzj0EAwIDSAAwRQIgSGxnJ+/cLUNTzt7fhr/mjJn7ShsTW33dAdfLM7H2\n" +
+			"z/gCIQDyVf8DePtxlkMBScTxZmIlMQdNc6+6VGZQ4QscruVLmg==\n" +
+			"-----END CERTIFICATE-----"
+		tests := []struct {
+			name         string
+			privateKey   string
+			password     string
+			hasError     bool
+			errorMessage string
+		}{
+			{
+				name: "encrypted key and invalid password",
+				privateKey: "-----BEGIN EC PRIVATE KEY-----\n" +
+					"Proc-Type: 4,ENCRYPTED\n" +
+					"DEK-Info: AES-256-CBC,DF2445CBFE2E5B112FB2B721063757E5\n" +
+					"o/VKNZjQcRM2hatqUkQ0dTolL7i2i5hJX9XYsl+TMsq8ZkC83uY/JdR986QS+W2c\n" +
+					"EoQGtVGVeL0KGvGpzjTX3YAKXM7Lg5btAeS8GvJ9S7YFd8s0q1pqDdffl2RyjJav\n" +
+					"t1jx6XvLu2nBrOUARvHqjkkJQCTdRf2a34GJdbZqE+4=\n" +
+					"-----END EC PRIVATE KEY-----",
+				password:     "iZfYGcrgFHOg4nweEo7ufT",
+				hasError:     true,
+				errorMessage: "x509: decryption password incorrect",
+			},
+			{
+				name: "encrypted key and valid password",
+				privateKey: "-----BEGIN EC PRIVATE KEY-----\n" +
+					"Proc-Type: 4,ENCRYPTED\n" +
+					"DEK-Info: AES-256-CBC,DF2445CBFE2E5B112FB2B721063757E5\n" +
+					"o/VKNZjQcRM2hatqUkQ0dTolL7i2i5hJX9XYsl+TMsq8ZkC83uY/JdR986QS+W2c\n" +
+					"EoQGtVGVeL0KGvGpzjTX3YAKXM7Lg5btAeS8GvJ9S7YFd8s0q1pqDdffl2RyjJav\n" +
+					"t1jx6XvLu2nBrOUARvHqjkkJQCTdRf2a34GJdbZqE+4=\n" +
+					"-----END EC PRIVATE KEY-----",
+				password:     "12345",
+				hasError:     false,
+				errorMessage: "",
+			},
+			{
+				name: "encrypted pks8 format key and valid password",
+				privateKey: "-----BEGIN ENCRYPTED PRIVATE KEY-----\n" +
+					"MIHsMFcGCSqGSIb3DQEFDTBKMCkGCSqGSIb3DQEFDDAcBAjcfarGfrRgUgICCAAw\n" +
+					"DAYIKoZIhvcNAgkFADAdBglghkgBZQMEASoEEFmtmKEFmThbkbpxmC6iBvoEgZCE\n" +
+					"pDCpH/yCLmSpjdi/PC74I794nzHyCWf/oS0JhM0Q7J+abZP+p5pnreKft1f15Dbw\n" +
+					"QG9alfoM6EffJcVo3gf1tgQrpGGFMwczc4VhQgSGDy0XjZSbd2K0QCFGSmD2ZIR1\n" +
+					"qPG3WepWjKmIsYffGeKZx+FjXHSFeGk7RnssNAyKcPruDQIdWWyXxX1+ugBKuBw=\n" +
+					"-----END ENCRYPTED PRIVATE KEY-----\n",
+				password:     "12345",
+				hasError:     true,
+				errorMessage: "encrypted pkcs8 formatted key is not supported",
+			},
+			{
+				name: "non encrypted key and password",
+				privateKey: "-----BEGIN EC PRIVATE KEY-----\n" +
+					"MHcCAQEEINVilD5qOBkSy+AYfd41X0QPB5N3Z6OzgoBj8FZmSJOFoAoGCCqGSM49\n" +
+					"AwEHoUQDQgAEF8XzmC7x8Ns0Y2Wyu2c77ge+6I/ghcDTjWOMZzMPmRRDxqKFLuGD\n" +
+					"zW1Kss13WODGSS8+j7dNCPOeLKyK6cbeIg==\n" +
+					"-----END EC PRIVATE KEY-----",
+				password:     "12345",
+				hasError:     true,
+				errorMessage: "x509: no DEK-Info header in block",
+			},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				tlsAuth := []*TLSAuth{
+					{TLSAuthFields{
+						Domains:  domains,
+						Cert:     cert,
+						Key:      tc.privateKey,
+						Password: null.StringFrom(tc.password),
+					}, nil},
+				}
+				opts := Options{}.Apply(Options{TLSAuth: tlsAuth})
+				assert.Equal(t, tlsAuth, opts.TLSAuth)
+
+				t.Run("Roundtrip", func(t *testing.T) {
+					t.Parallel()
+					optsData, err := json.Marshal(opts)
+					assert.NoError(t, err)
+
+					var opts2 Options
+					err = json.Unmarshal(optsData, &opts2)
+					if tc.hasError {
+						assert.Error(t, err)
+						assert.Contains(t, err.Error(), tc.errorMessage)
+					} else {
+						assert.NoError(t, err)
+					}
+				})
+			})
+		}
+	})
 	t.Run("NoConnectionReuse", func(t *testing.T) {
+		t.Parallel()
 		opts := Options{}.Apply(Options{NoConnectionReuse: null.BoolFrom(true)})
 		assert.True(t, opts.NoConnectionReuse.Valid)
 		assert.True(t, opts.NoConnectionReuse.Bool)
 	})
 	t.Run("NoVUConnectionReuse", func(t *testing.T) {
+		t.Parallel()
 		opts := Options{}.Apply(Options{NoVUConnectionReuse: null.BoolFrom(true)})
 		assert.True(t, opts.NoVUConnectionReuse.Valid)
 		assert.True(t, opts.NoVUConnectionReuse.Bool)
 	})
 	t.Run("NoCookiesReset", func(t *testing.T) {
+		t.Parallel()
 		opts := Options{}.Apply(Options{NoCookiesReset: null.BoolFrom(true)})
 		assert.True(t, opts.NoCookiesReset.Valid)
 		assert.True(t, opts.NoCookiesReset.Bool)
 	})
 	t.Run("BlacklistIPs", func(t *testing.T) {
+		t.Parallel()
 		opts := Options{}.Apply(Options{
 			BlacklistIPs: []*IPNet{{
 				IPNet: net.IPNet{
@@ -331,6 +465,7 @@ func TestOptions(t *testing.T) {
 		})
 	})
 	t.Run("BlockedHostnames", func(t *testing.T) {
+		t.Parallel()
 		blockedHostnames, err := types.NewNullHostnameTrie([]string{"test.k6.io", "*valid.pattern"})
 		require.NoError(t, err)
 		opts := Options{}.Apply(Options{BlockedHostnames: blockedHostnames})
@@ -339,39 +474,47 @@ func TestOptions(t *testing.T) {
 	})
 
 	t.Run("Hosts", func(t *testing.T) {
-		host, err := NewHostAddress(net.ParseIP("192.0.2.1"), "80")
+		t.Parallel()
+		host, err := types.NewHost(net.ParseIP("192.0.2.1"), "80")
 		assert.NoError(t, err)
 
-		opts := Options{}.Apply(Options{Hosts: map[string]*HostAddress{
-			"test.loadimpact.com": host,
-		}})
+		hosts, err := types.NewNullHosts(map[string]types.Host{
+			"test.k6.com": *host,
+		})
+		assert.NoError(t, err)
+		opts := Options{}.Apply(Options{Hosts: hosts})
 		assert.NotNil(t, opts.Hosts)
 		assert.NotEmpty(t, opts.Hosts)
-		assert.Equal(t, "192.0.2.1:80", opts.Hosts["test.loadimpact.com"].String())
+
+		assert.Equal(t, "192.0.2.1:80", opts.Hosts.Trie.Match("test.k6.com").String())
 	})
 
 	t.Run("Throws", func(t *testing.T) {
+		t.Parallel()
 		opts := Options{}.Apply(Options{Throw: null.BoolFrom(true)})
 		assert.True(t, opts.Throw.Valid)
 		assert.Equal(t, true, opts.Throw.Bool)
 	})
 
 	t.Run("Thresholds", func(t *testing.T) {
-		opts := Options{}.Apply(Options{Thresholds: map[string]stats.Thresholds{
+		t.Parallel()
+		opts := Options{}.Apply(Options{Thresholds: map[string]metrics.Thresholds{
 			"metric": {
-				Thresholds: []*stats.Threshold{{}},
+				Thresholds: []*metrics.Threshold{{}},
 			},
 		}})
 		assert.NotNil(t, opts.Thresholds)
 		assert.NotEmpty(t, opts.Thresholds)
 	})
 	t.Run("External", func(t *testing.T) {
+		t.Parallel()
 		ext := map[string]json.RawMessage{"a": json.RawMessage("1")}
 		opts := Options{}.Apply(Options{External: ext})
 		assert.Equal(t, ext, opts.External)
 	})
 
 	t.Run("JSON", func(t *testing.T) {
+		t.Parallel()
 		data, err := json.Marshal(Options{})
 		assert.NoError(t, err)
 		var opts Options
@@ -379,66 +522,78 @@ func TestOptions(t *testing.T) {
 		assert.Equal(t, Options{}, opts)
 	})
 	t.Run("SystemTags", func(t *testing.T) {
-		opts := Options{}.Apply(Options{SystemTags: stats.NewSystemTagSet(stats.TagProto)})
+		t.Parallel()
+		opts := Options{}.Apply(Options{SystemTags: metrics.NewSystemTagSet(metrics.TagProto)})
 		assert.NotNil(t, opts.SystemTags)
 		assert.NotEmpty(t, opts.SystemTags)
-		assert.True(t, opts.SystemTags.Has(stats.TagProto))
+		assert.True(t, opts.SystemTags.Has(metrics.TagProto))
 
 		t.Run("JSON", func(t *testing.T) {
+			t.Parallel()
 			t.Run("Array", func(t *testing.T) {
+				t.Parallel()
 				var opts Options
 				jsonStr := `{"systemTags":["url"]}`
 				assert.NoError(t, json.Unmarshal([]byte(jsonStr), &opts))
-				assert.Equal(t, *stats.NewSystemTagSet(stats.TagURL), *opts.SystemTags)
+				assert.Equal(t, *metrics.NewSystemTagSet(metrics.TagURL), *opts.SystemTags)
 
 				t.Run("Roundtrip", func(t *testing.T) {
+					t.Parallel()
 					data, err := json.Marshal(opts.SystemTags)
 					assert.NoError(t, err)
 					assert.Equal(t, `["url"]`, string(data))
-					var vers2 stats.SystemTagSet
+					var vers2 metrics.SystemTagSet
 					assert.NoError(t, json.Unmarshal(data, &vers2))
 					assert.Equal(t, vers2, *opts.SystemTags)
 				})
 			})
 			t.Run("Blank", func(t *testing.T) {
+				t.Parallel()
 				var opts Options
 				jsonStr := `{"systemTags":[]}`
 				assert.NoError(t, json.Unmarshal([]byte(jsonStr), &opts))
-				assert.Equal(t, stats.SystemTagSet(0), *opts.SystemTags)
+				assert.Equal(t, metrics.SystemTagSet(0), *opts.SystemTags)
 			})
 		})
 	})
 	t.Run("SummaryTrendStats", func(t *testing.T) {
+		t.Parallel()
 		stats := []string{"myStat1", "myStat2"}
 		opts := Options{}.Apply(Options{SummaryTrendStats: stats})
 		assert.Equal(t, stats, opts.SummaryTrendStats)
 	})
 	t.Run("RunTags", func(t *testing.T) {
-		tags := stats.IntoSampleTags(&map[string]string{"myTag": "hello"})
+		t.Parallel()
+		tags := map[string]string{"myTag": "hello"}
 		opts := Options{}.Apply(Options{RunTags: tags})
 		assert.Equal(t, tags, opts.RunTags)
 	})
 	t.Run("DiscardResponseBodies", func(t *testing.T) {
+		t.Parallel()
 		opts := Options{}.Apply(Options{DiscardResponseBodies: null.BoolFrom(true)})
 		assert.True(t, opts.DiscardResponseBodies.Valid)
 		assert.True(t, opts.DiscardResponseBodies.Bool)
 	})
 	t.Run("ClientIPRanges", func(t *testing.T) {
-		clientIPRanges, err := types.NewIPPool("129.112.232.12,123.12.0.0/32")
+		t.Parallel()
+		clientIPRanges := types.NullIPPool{}
+		err := clientIPRanges.UnmarshalText([]byte("129.112.232.12,123.12.0.0/32"))
 		require.NoError(t, err)
-		opts := Options{}.Apply(Options{LocalIPs: types.NullIPPool{Pool: clientIPRanges, Valid: true}})
+		opts := Options{}.Apply(Options{LocalIPs: clientIPRanges})
 		assert.NotNil(t, opts.LocalIPs)
 	})
 }
 
 func TestOptionsEnv(t *testing.T) {
-	mustIPPool := func(s string) *types.IPPool {
-		p, err := types.NewIPPool(s)
+	t.Parallel()
+	mustNullIPPool := func(s string) types.NullIPPool {
+		p := types.NullIPPool{}
+		err := p.UnmarshalText([]byte(s))
 		require.NoError(t, err)
 		return p
 	}
 
-	testdata := map[struct{ Name, Key string }]map[string]interface{}{
+	testdata := map[struct{ Name, Key string }]map[string]any{
 		{"Paused", "K6_PAUSED"}: {
 			"":      null.Bool{},
 			"true":  null.BoolFrom(true),
@@ -509,8 +664,8 @@ func TestOptionsEnv(t *testing.T) {
 		},
 		{"LocalIPs", "K6_LOCAL_IPS"}: {
 			"":                 types.NullIPPool{},
-			"192.168.220.2":    types.NullIPPool{Pool: mustIPPool("192.168.220.2"), Valid: true},
-			"192.168.220.2/24": types.NullIPPool{Pool: mustIPPool("192.168.220.0/24"), Valid: true},
+			"192.168.220.2":    mustNullIPPool("192.168.220.2"),
+			"192.168.220.0/24": mustNullIPPool("192.168.220.0/24"),
 		},
 		{"Throw", "K6_THROW"}: {
 			"":      null.Bool{},
@@ -522,19 +677,28 @@ func TestOptionsEnv(t *testing.T) {
 			"true":  null.BoolFrom(true),
 			"false": null.BoolFrom(false),
 		},
+		{"HandleSummaryTimeout", "K6_HANDLE_SUMMARY_TIMEOUT"}: {
+			"":     types.NullDuration{},
+			"10s":  types.NullDurationFrom(10 * time.Second),
+			"3m":   types.NullDurationFrom(3 * time.Minute),
+			"300s": types.NullDurationFrom(300 * time.Second),
+		},
 		// Thresholds
 		// External
 	}
 	for field, data := range testdata {
-		field, data := field, data
 		t.Run(field.Name, func(t *testing.T) {
+			t.Parallel()
 			for str, val := range data {
-				str, val := str, val
 				t.Run(`"`+str+`"`, func(t *testing.T) {
-					restore := testutils.SetEnv(t, []string{fmt.Sprintf("%s=%s", field.Key, str)})
-					defer restore()
+					t.Parallel()
 					var opts Options
-					assert.NoError(t, envconfig.Process("k6", &opts))
+					assert.NoError(t, envconfig.Process("k6", &opts, func(k string) (string, bool) {
+						if k == field.Key {
+							return str, true
+						}
+						return "", false
+					}))
 					assert.Equal(t, val, reflect.ValueOf(opts).FieldByName(field.Name).Interface())
 				})
 			}
@@ -543,6 +707,7 @@ func TestOptionsEnv(t *testing.T) {
 }
 
 func TestCIDRUnmarshal(t *testing.T) {
+	t.Parallel()
 	testData := []struct {
 		input          string
 		expectedOutput *IPNet
@@ -570,8 +735,8 @@ func TestCIDRUnmarshal(t *testing.T) {
 	}
 
 	for _, data := range testData {
-		data := data
 		t.Run(data.input, func(t *testing.T) {
+			t.Parallel()
 			actualIPNet := &IPNet{}
 			err := actualIPNet.UnmarshalText([]byte(data.input))
 
@@ -586,20 +751,21 @@ func TestCIDRUnmarshal(t *testing.T) {
 	}
 }
 
-func TestHostAddressUnmarshal(t *testing.T) {
+func TestHost(t *testing.T) {
+	t.Parallel()
 	testData := []struct {
 		input          string
-		expectedOutput *HostAddress
+		expectedOutput *types.Host
 		expectFailure  string
 	}{
 		{
 			"1.2.3.4",
-			&HostAddress{IP: net.ParseIP("1.2.3.4")},
+			&types.Host{IP: net.ParseIP("1.2.3.4")},
 			"",
 		},
 		{
 			"1.2.3.4:80",
-			&HostAddress{IP: net.ParseIP("1.2.3.4"), Port: 80},
+			&types.Host{IP: net.ParseIP("1.2.3.4"), Port: 80},
 			"",
 		},
 		{
@@ -609,17 +775,17 @@ func TestHostAddressUnmarshal(t *testing.T) {
 		},
 		{
 			"2001:0db8:0000:0000:0000:ff00:0042:8329",
-			&HostAddress{IP: net.ParseIP("2001:0db8:0000:0000:0000:ff00:0042:8329")},
+			&types.Host{IP: net.ParseIP("2001:0db8:0000:0000:0000:ff00:0042:8329")},
 			"",
 		},
 		{
 			"2001:db8::68",
-			&HostAddress{IP: net.ParseIP("2001:db8::68")},
+			&types.Host{IP: net.ParseIP("2001:db8::68")},
 			"",
 		},
 		{
 			"[2001:db8::68]:80",
-			&HostAddress{IP: net.ParseIP("2001:db8::68"), Port: 80},
+			&types.Host{IP: net.ParseIP("2001:db8::68"), Port: 80},
 			"",
 		},
 		{
@@ -630,9 +796,9 @@ func TestHostAddressUnmarshal(t *testing.T) {
 	}
 
 	for _, data := range testData {
-		data := data
 		t.Run(data.input, func(t *testing.T) {
-			actualHost := &HostAddress{}
+			t.Parallel()
+			actualHost := &types.Host{}
 			err := actualHost.UnmarshalText([]byte(data.input))
 
 			if data.expectFailure != "" {
@@ -643,4 +809,44 @@ func TestHostAddressUnmarshal(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidate(t *testing.T) {
+	t.Parallel()
+	t.Run("setupTimeout", func(t *testing.T) {
+		t.Parallel()
+		testData := []struct {
+			input         string
+			expectFailure bool
+			expectOutput  types.Duration
+		}{
+			{
+				input:         "1s",
+				expectFailure: false,
+				expectOutput:  types.Duration(1 * time.Second),
+			},
+			{
+				input:         "0s",
+				expectFailure: true,
+			},
+			{
+				input:         "-1s",
+				expectFailure: true,
+			},
+		}
+		for _, data := range testData {
+			t.Run(data.input, func(t *testing.T) {
+				t.Parallel()
+				sec, _ := time.ParseDuration(data.input)
+				opts := Options{}.Apply(Options{SetupTimeout: types.NewNullDuration(sec, true)})
+				errorsSlice := opts.Validate()
+				if data.expectFailure {
+					assert.Len(t, errorsSlice, 1)
+				} else {
+					assert.Len(t, errorsSlice, 0)
+					assert.Equal(t, time.Duration(opts.SetupTimeout.Duration), sec)
+				}
+			})
+		}
+	})
 }

@@ -1,33 +1,10 @@
-/*
- *
- * k6 - a next-generation load testing tool
- * Copyright (C) 2016 Load Impact
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- */
-
 package html
 
 import (
-	"context"
 	"testing"
 
-	"github.com/dop251/goja"
+	"github.com/grafana/sobek"
 	"github.com/stretchr/testify/assert"
-
-	"go.k6.io/k6/js/common"
 )
 
 const testHTMLElems = `
@@ -86,20 +63,14 @@ const testHTMLElems = `
 `
 
 func TestElements(t *testing.T) {
-	rt := goja.New()
-	rt.SetFieldNameMapper(common.FieldNameMapper{})
-
-	ctx := common.WithRuntime(context.Background(), rt)
-	rt.Set("src", testHTMLElems)
-	rt.Set("html", common.Bind(rt, &HTML{}, &ctx))
-
-	_, err := rt.RunString(`var doc = html.parseHTML(src)`)
-
-	assert.NoError(t, err)
-	assert.IsType(t, Selection{}, rt.Get("doc").Export())
-
+	t.Parallel()
 	t.Run("AnchorElement", func(t *testing.T) {
+		t.Parallel()
+
 		t.Run("Hash", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("a").get(0).hash()`); assert.NoError(t, err) {
 				assert.Equal(t, "#hashtext", v.Export())
 			}
@@ -108,6 +79,9 @@ func TestElements(t *testing.T) {
 			}
 		})
 		t.Run("Host", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("a").get(1).host()`); assert.NoError(t, err) {
 				assert.Equal(t, "example.com", v.Export())
 			}
@@ -125,6 +99,9 @@ func TestElements(t *testing.T) {
 			}
 		})
 		t.Run("Hostname", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("a").get(1).hostname()`); assert.NoError(t, err) {
 				assert.Equal(t, "example.com", v.Export())
 			}
@@ -133,6 +110,9 @@ func TestElements(t *testing.T) {
 			}
 		})
 		t.Run("Port", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("a").get(5).port()`); assert.NoError(t, err) {
 				assert.Equal(t, "80", v.Export())
 			}
@@ -141,6 +121,9 @@ func TestElements(t *testing.T) {
 			}
 		})
 		t.Run("Username", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("a").get(5).username()`); assert.NoError(t, err) {
 				assert.Equal(t, "username", v.Export())
 			}
@@ -149,6 +132,9 @@ func TestElements(t *testing.T) {
 			}
 		})
 		t.Run("Password", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("a").get(5).password()`); assert.NoError(t, err) {
 				assert.Equal(t, "password", v.Export())
 			}
@@ -157,6 +143,9 @@ func TestElements(t *testing.T) {
 			}
 		})
 		t.Run("Origin", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("a").get(5).origin()`); assert.NoError(t, err) {
 				assert.Equal(t, "http://example.com:80", v.Export())
 			}
@@ -165,6 +154,9 @@ func TestElements(t *testing.T) {
 			}
 		})
 		t.Run("Pathname", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("a").get(1).pathname()`); assert.NoError(t, err) {
 				assert.Equal(t, "", v.Export())
 			}
@@ -176,6 +168,9 @@ func TestElements(t *testing.T) {
 			}
 		})
 		t.Run("Protocol", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("a").get(4).protocol()`); assert.NoError(t, err) {
 				assert.Equal(t, "https", v.Export())
 			}
@@ -184,6 +179,9 @@ func TestElements(t *testing.T) {
 			}
 		})
 		t.Run("RelList", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("a").get(6).relList()`); assert.NoError(t, err) {
 				assert.Equal(t, []string{"prev", "next"}, v.Export())
 			}
@@ -192,23 +190,37 @@ func TestElements(t *testing.T) {
 			}
 		})
 		t.Run("Search", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("a").get(0).search()`); assert.NoError(t, err) {
 				assert.Equal(t, "?querytxt", v.Export())
 			}
 		})
 		t.Run("Text", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("a").get(6).text()`); assert.NoError(t, err) {
 				assert.Equal(t, "6", v.Export())
 			}
 		})
 	})
 	t.Run("AreaElement", func(t *testing.T) {
+		t.Parallel()
+		rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 		if v, err := rt.RunString(`doc.find("area").get(0).toString()`); assert.NoError(t, err) {
 			assert.Equal(t, "web.address.com", v.Export())
 		}
 	})
 	t.Run("ButtonElement", func(t *testing.T) {
+		t.Parallel()
+
 		t.Run("form", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("#form_btn").get(0).form().id()`); assert.NoError(t, err) {
 				assert.Equal(t, "form1", v.Export())
 			}
@@ -220,6 +232,9 @@ func TestElements(t *testing.T) {
 			}
 		})
 		t.Run("formaction", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("#form_btn").get(0).formAction()`); assert.NoError(t, err) {
 				assert.Equal(t, "action_url", v.Export())
 			}
@@ -228,6 +243,9 @@ func TestElements(t *testing.T) {
 			}
 		})
 		t.Run("formenctype", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("#form_btn").get(0).formEnctype()`); assert.NoError(t, err) {
 				assert.Equal(t, "text/plain", v.Export())
 			}
@@ -236,6 +254,9 @@ func TestElements(t *testing.T) {
 			}
 		})
 		t.Run("formmethod", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("#form_btn").get(0).formMethod()`); assert.NoError(t, err) {
 				assert.Equal(t, "get", v.Export())
 			}
@@ -244,6 +265,9 @@ func TestElements(t *testing.T) {
 			}
 		})
 		t.Run("formnovalidate", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("#form_btn").get(0).formNoValidate()`); assert.NoError(t, err) {
 				assert.Equal(t, false, v.Export())
 			}
@@ -252,6 +276,9 @@ func TestElements(t *testing.T) {
 			}
 		})
 		t.Run("formtarget", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("#form_btn").get(0).formTarget()`); assert.NoError(t, err) {
 				assert.Equal(t, "_self", v.Export())
 			}
@@ -260,50 +287,73 @@ func TestElements(t *testing.T) {
 			}
 		})
 		t.Run("labels", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("#form_btn").get(0).labels()`); assert.NoError(t, err) {
-				assert.Equal(t, 1, len(v.Export().([]goja.Value)))
-				assert.Equal(t, "form_btn_label", v.Export().([]goja.Value)[0].Export().(LabelElement).Id())
+				assert.Equal(t, 1, len(v.Export().([]sobek.Value)))
+				assert.Equal(t, "form_btn_label", v.Export().([]sobek.Value)[0].Export().(LabelElement).Id())
 			}
 			if v, err := rt.RunString(`doc.find("#form_btn_2").get(0).labels()`); assert.NoError(t, err) {
-				assert.Equal(t, 2, len(v.Export().([]goja.Value)))
-				assert.Equal(t, "wrapper_label", v.Export().([]goja.Value)[0].Export().(LabelElement).Id())
-				assert.Equal(t, "form_btn_2_label", v.Export().([]goja.Value)[1].Export().(LabelElement).Id())
+				assert.Equal(t, 2, len(v.Export().([]sobek.Value)))
+				assert.Equal(t, "wrapper_label", v.Export().([]sobek.Value)[0].Export().(LabelElement).Id())
+				assert.Equal(t, "form_btn_2_label", v.Export().([]sobek.Value)[1].Export().(LabelElement).Id())
 			}
 		})
 		t.Run("name", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("#form_btn").get(0).name()`); assert.NoError(t, err) {
 				assert.Equal(t, "form_btn", v.Export())
 			}
 		})
 		t.Run("value", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("#form_btn_2").get(0).value()`); assert.NoError(t, err) {
 				assert.Equal(t, "form_btn_2_initval", v.Export())
 			}
 		})
 	})
 	t.Run("CanvasElement", func(t *testing.T) {
+		t.Parallel()
+
 		t.Run("width", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("canvas").get(0).width()`); assert.NoError(t, err) {
 				assert.Equal(t, int64(200), v.Export())
 			}
 		})
 		t.Run("height", func(t *testing.T) {
+			t.Parallel()
+			rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 			if v, err := rt.RunString(`doc.find("canvas").get(0).height()`); assert.NoError(t, err) {
 				assert.Equal(t, int64(150), v.Export())
 			}
 		})
 	})
 	t.Run("DataListElement options", func(t *testing.T) {
+		t.Parallel()
+		rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 		if v, err := rt.RunString(`doc.find("datalist").get(0).options()`); assert.NoError(t, err) {
-			assert.Equal(t, 2, len(v.Export().([]goja.Value)))
-			assert.Equal(t, "dl_opt_1", v.Export().([]goja.Value)[0].Export().(OptionElement).Id())
-			assert.Equal(t, "dl_opt_2", v.Export().([]goja.Value)[1].Export().(OptionElement).Id())
+			assert.Equal(t, 2, len(v.Export().([]sobek.Value)))
+			assert.Equal(t, "dl_opt_1", v.Export().([]sobek.Value)[0].Export().(OptionElement).Id())
+			assert.Equal(t, "dl_opt_2", v.Export().([]sobek.Value)[1].Export().(OptionElement).Id())
 		}
 	})
 	t.Run("FieldSetElement", func(t *testing.T) {
+		t.Parallel()
+		rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 		t.Run("elements", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("fieldset").get(0).elements()`); assert.NoError(t, err) {
-				assert.Equal(t, 5, len(v.Export().([]goja.Value)))
+				assert.Equal(t, 5, len(v.Export().([]sobek.Value)))
 			}
 		})
 		t.Run("type", func(t *testing.T) {
@@ -318,9 +368,12 @@ func TestElements(t *testing.T) {
 		})
 	})
 	t.Run("FormElement", func(t *testing.T) {
+		t.Parallel()
+		rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 		t.Run("elements", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("#fieldset_form").get(0).elements()`); assert.NoError(t, err) {
-				assert.Equal(t, 6, len(v.Export().([]goja.Value)))
+				assert.Equal(t, 6, len(v.Export().([]sobek.Value)))
 			}
 		})
 		t.Run("length", func(t *testing.T) {
@@ -338,13 +391,19 @@ func TestElements(t *testing.T) {
 		})
 	})
 	t.Run("InputElement", func(t *testing.T) {
+		t.Parallel()
+		rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 		t.Run("form", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("#test_dl_input").get(0).list().options()`); assert.NoError(t, err) {
-				assert.Equal(t, 2, len(v.Export().([]goja.Value)))
+				assert.Equal(t, 2, len(v.Export().([]sobek.Value)))
 			}
 		})
 	})
 	t.Run("LabelElement", func(t *testing.T) {
+		t.Parallel()
+		rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 		t.Run("control", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("#form_btn_2_label").get(0).control().value()`); assert.NoError(t, err) {
 				assert.Equal(t, "form_btn_2_initval", v.Export())
@@ -357,6 +416,9 @@ func TestElements(t *testing.T) {
 		})
 	})
 	t.Run("LegendElement", func(t *testing.T) {
+		t.Parallel()
+		rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 		t.Run("form", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("#legend_1").get(0).form().id()`); assert.NoError(t, err) {
 				assert.Equal(t, "fieldset_form", v.Export())
@@ -364,6 +426,9 @@ func TestElements(t *testing.T) {
 		})
 	})
 	t.Run("LinkElement", func(t *testing.T) {
+		t.Parallel()
+		rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 		t.Run("rel list", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("link").get(0).relList()`); assert.NoError(t, err) {
 				assert.Equal(t, []string{"alternate", "next"}, v.Export())
@@ -371,18 +436,24 @@ func TestElements(t *testing.T) {
 		})
 	})
 	t.Run("MapElement", func(t *testing.T) {
+		t.Parallel()
+		rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 		t.Run("areas", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("#find_this_map").get(0).areas()`); assert.NoError(t, err) {
-				assert.Equal(t, 3, len(v.Export().([]goja.Value)))
+				assert.Equal(t, 3, len(v.Export().([]sobek.Value)))
 			}
 		})
 		t.Run("images", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("#find_this_map").get(0).images()`); assert.NoError(t, err) {
-				assert.Equal(t, 2, len(v.Export().([]goja.Value)))
+				assert.Equal(t, 2, len(v.Export().([]sobek.Value)))
 			}
 		})
 	})
 	t.Run("ObjectElement", func(t *testing.T) {
+		t.Parallel()
+		rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 		t.Run("form", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("#obj_1").get(0).form().id()`); assert.NoError(t, err) {
 				assert.Equal(t, "form1", v.Export())
@@ -390,6 +461,9 @@ func TestElements(t *testing.T) {
 		})
 	})
 	t.Run("OptionElement", func(t *testing.T) {
+		t.Parallel()
+		rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 		t.Run("disabled", func(t *testing.T) {
 			v1, err1 := rt.RunString(`doc.find("#opt_1").get(0).disabled()`)
 			v2, err2 := rt.RunString(`doc.find("#opt_2").get(0).disabled()`)
@@ -436,6 +510,9 @@ func TestElements(t *testing.T) {
 		})
 	})
 	t.Run("OutputElement", func(t *testing.T) {
+		t.Parallel()
+		rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 		t.Run("value", func(t *testing.T) {
 			v1, err1 := rt.RunString(`doc.find("#output1").get(0).value()`)
 			v2, err2 := rt.RunString(`doc.find("#output1").get(0).defaultValue()`)
@@ -446,11 +523,14 @@ func TestElements(t *testing.T) {
 		})
 		t.Run("labels", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("#output1").get(0).labels()`); assert.NoError(t, err) {
-				assert.Equal(t, 2, len(v.Export().([]goja.Value)))
+				assert.Equal(t, 2, len(v.Export().([]sobek.Value)))
 			}
 		})
 	})
 	t.Run("ProgressElement", func(t *testing.T) {
+		t.Parallel()
+		rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 		t.Run("max", func(t *testing.T) {
 			v1, err1 := rt.RunString(`doc.find("#progress1").get(0).max()`)
 			v2, err2 := rt.RunString(`doc.find("#progress2").get(0).max()`)
@@ -477,6 +557,9 @@ func TestElements(t *testing.T) {
 		})
 	})
 	t.Run("ScriptElement", func(t *testing.T) {
+		t.Parallel()
+		rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 		t.Run("text", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("#script1").get(0).text()`); assert.NoError(t, err) {
 				assert.Equal(t, "script text", v.Export())
@@ -484,6 +567,9 @@ func TestElements(t *testing.T) {
 		})
 	})
 	t.Run("SelectElement", func(t *testing.T) {
+		t.Parallel()
+		rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 		t.Run("form", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("#sel2").get(0).form().id()`); assert.NoError(t, err) {
 				assert.Equal(t, "form3", v.Export())
@@ -496,14 +582,14 @@ func TestElements(t *testing.T) {
 		})
 		t.Run("options", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("#sel1").get(0).options()`); assert.NoError(t, err) {
-				assert.Equal(t, 3, len(v.Export().([]goja.Value)))
-				assert.Equal(t, "opt_1", v.Export().([]goja.Value)[0].Export().(OptionElement).Id())
+				assert.Equal(t, 3, len(v.Export().([]sobek.Value)))
+				assert.Equal(t, "opt_1", v.Export().([]sobek.Value)[0].Export().(OptionElement).Id())
 			}
 		})
 		t.Run("selectedOptions", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("#sel1").get(0).selectedOptions()`); assert.NoError(t, err) {
-				assert.Equal(t, 2, len(v.Export().([]goja.Value)))
-				assert.Equal(t, "opt_2", v.Export().([]goja.Value)[0].Export().(OptionElement).Id())
+				assert.Equal(t, 2, len(v.Export().([]sobek.Value)))
+				assert.Equal(t, "opt_2", v.Export().([]sobek.Value)[0].Export().(OptionElement).Id())
 			}
 		})
 		t.Run("selectedIndex", func(t *testing.T) {
@@ -521,6 +607,9 @@ func TestElements(t *testing.T) {
 		})
 	})
 	t.Run("StyleElement", func(t *testing.T) {
+		t.Parallel()
+		rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 		t.Run("text", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("#style1").get(0).type()`); assert.NoError(t, err) {
 				assert.Equal(t, "text/css", v.Export())
@@ -528,6 +617,9 @@ func TestElements(t *testing.T) {
 		})
 	})
 	t.Run("TableElement", func(t *testing.T) {
+		t.Parallel()
+		rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 		t.Run("caption", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("table").get(0).caption().textContent()`); assert.NoError(t, err) {
 				assert.Equal(t, "caption text", v.Export())
@@ -535,29 +627,29 @@ func TestElements(t *testing.T) {
 		})
 		t.Run("thead", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("table").get(0).tHead().rows()`); assert.NoError(t, err) {
-				assert.Equal(t, 1, len(v.Export().([]goja.Value)))
-				assert.Equal(t, "thead_row", v.Export().([]goja.Value)[0].Export().(TableRowElement).Id())
+				assert.Equal(t, 1, len(v.Export().([]sobek.Value)))
+				assert.Equal(t, "thead_row", v.Export().([]sobek.Value)[0].Export().(TableRowElement).Id())
 			}
 		})
 		t.Run("tbody", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("table").get(0).tBodies()[0].rows()`); assert.NoError(t, err) {
-				assert.Equal(t, 2, len(v.Export().([]goja.Value)))
-				assert.Equal(t, "tbody_row", v.Export().([]goja.Value)[1].Export().(TableRowElement).Id())
+				assert.Equal(t, 2, len(v.Export().([]sobek.Value)))
+				assert.Equal(t, "tbody_row", v.Export().([]sobek.Value)[1].Export().(TableRowElement).Id())
 			}
 		})
 		t.Run("tfoot", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("table").get(0).tFoot().rows()`); assert.NoError(t, err) {
-				assert.Equal(t, 3, len(v.Export().([]goja.Value)))
-				assert.Equal(t, "tfoot_row", v.Export().([]goja.Value)[2].Export().(TableRowElement).Id())
+				assert.Equal(t, 3, len(v.Export().([]sobek.Value)))
+				assert.Equal(t, "tfoot_row", v.Export().([]sobek.Value)[2].Export().(TableRowElement).Id())
 			}
 		})
 		t.Run("rows", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("table").get(0).rows()`); assert.NoError(t, err) {
-				assert.Equal(t, 7, len(v.Export().([]goja.Value)))
-				assert.Equal(t, "thead_row", v.Export().([]goja.Value)[0].Export().(TableRowElement).Id())
-				assert.Equal(t, "tfoot_row", v.Export().([]goja.Value)[3].Export().(TableRowElement).Id())
-				assert.Equal(t, "tbody_row", v.Export().([]goja.Value)[5].Export().(TableRowElement).Id())
-				assert.Equal(t, "last_row", v.Export().([]goja.Value)[6].Export().(TableRowElement).Id())
+				assert.Equal(t, 7, len(v.Export().([]sobek.Value)))
+				assert.Equal(t, "thead_row", v.Export().([]sobek.Value)[0].Export().(TableRowElement).Id())
+				assert.Equal(t, "tfoot_row", v.Export().([]sobek.Value)[3].Export().(TableRowElement).Id())
+				assert.Equal(t, "tbody_row", v.Export().([]sobek.Value)[5].Export().(TableRowElement).Id())
+				assert.Equal(t, "last_row", v.Export().([]sobek.Value)[6].Export().(TableRowElement).Id())
 			}
 		})
 		t.Run("TableCellElement", func(t *testing.T) {
@@ -591,8 +683,8 @@ func TestElements(t *testing.T) {
 		t.Run("TableRowElement", func(t *testing.T) {
 			t.Run("cells", func(t *testing.T) {
 				if v, err := rt.RunString(`doc.find("#thead_row").get(0).cells()`); assert.NoError(t, err) {
-					assert.Equal(t, 3, len(v.Export().([]goja.Value)))
-					assert.Equal(t, "th_cell", v.Export().([]goja.Value)[1].Export().(TableHeaderCellElement).Id())
+					assert.Equal(t, 3, len(v.Export().([]sobek.Value)))
+					assert.Equal(t, "th_cell", v.Export().([]sobek.Value)[1].Export().(TableHeaderCellElement).Id())
 				}
 			})
 			t.Run("colSpan", func(t *testing.T) {
@@ -622,15 +714,21 @@ func TestElements(t *testing.T) {
 		})
 	})
 	t.Run("VideoElement", func(t *testing.T) {
+		t.Parallel()
+		rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 		t.Run("text tracks", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("#video1").get(0).textTracks()`); assert.NoError(t, err) {
-				assert.Equal(t, 2, len(v.Export().([]goja.Value)))
-				assert.Equal(t, "trk1", v.Export().([]goja.Value)[0].Export().(TrackElement).Id())
-				assert.Equal(t, "trk2", v.Export().([]goja.Value)[1].Export().(TrackElement).Id())
+				assert.Equal(t, 2, len(v.Export().([]sobek.Value)))
+				assert.Equal(t, "trk1", v.Export().([]sobek.Value)[0].Export().(TrackElement).Id())
+				assert.Equal(t, "trk2", v.Export().([]sobek.Value)[1].Export().(TrackElement).Id())
 			}
 		})
 	})
 	t.Run("TitleElement", func(t *testing.T) {
+		t.Parallel()
+		rt := getTestRuntimeWithDoc(t, testHTMLElems)
+
 		t.Run("text tracks", func(t *testing.T) {
 			if v, err := rt.RunString(`doc.find("title").get(0).text()`); assert.NoError(t, err) {
 				assert.Equal(t, "titletest", v.Export())

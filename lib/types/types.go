@@ -1,23 +1,6 @@
-/*
- *
- * k6 - a next-generation load testing tool
- * Copyright (C) 2016 Load Impact
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- */
-
+// Package types contains types used in the codebase
+// Most of the types have a Null prefix like gopkg.in/guregu/null.v3
+// and UnmarshalJSON and MarshalJSON methods.
 package types
 
 import (
@@ -25,68 +8,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
-
-	"gopkg.in/guregu/null.v3"
 )
 
-// NullDecoder converts data with expected type f to a guregu/null value
-// of equivalent type t. It returns an error if a type mismatch occurs.
-func NullDecoder(f reflect.Type, t reflect.Type, data interface{}) (interface{}, error) {
-	typeFrom := f.String()
-	typeTo := t.String()
-
-	expectedType := ""
-	switch typeTo {
-	case "null.String":
-		if typeFrom == reflect.String.String() {
-			return null.StringFrom(data.(string)), nil
-		}
-		expectedType = reflect.String.String()
-	case "null.Bool":
-		if typeFrom == reflect.Bool.String() {
-			return null.BoolFrom(data.(bool)), nil
-		}
-		expectedType = reflect.Bool.String()
-	case "null.Int":
-		if typeFrom == reflect.Int.String() {
-			return null.IntFrom(int64(data.(int))), nil
-		}
-		if typeFrom == reflect.Int32.String() {
-			return null.IntFrom(int64(data.(int32))), nil
-		}
-		if typeFrom == reflect.Int64.String() {
-			return null.IntFrom(data.(int64)), nil
-		}
-		expectedType = reflect.Int.String()
-	case "null.Float":
-		if typeFrom == reflect.Float32.String() {
-			return null.FloatFrom(float64(data.(float32))), nil
-		}
-		if typeFrom == reflect.Float64.String() {
-			return null.FloatFrom(data.(float64)), nil
-		}
-		expectedType = reflect.Float32.String() + " or " + reflect.Float64.String()
-	case "types.NullDuration":
-		if typeFrom == reflect.String.String() {
-			var d NullDuration
-			err := d.UnmarshalText([]byte(data.(string)))
-			return d, err
-		}
-		expectedType = reflect.String.String()
-	}
-
-	if expectedType != "" {
-		return data, fmt.Errorf("expected '%s', got '%s'", expectedType, typeFrom)
-	}
-
-	return data, nil
-}
-
-//TODO: something better that won't require so much boilerplate and casts for NullDuration values...
+// TODO: something better that won't require so much boilerplate and casts for NullDuration values...
 
 // Duration is an alias for time.Duration that de/serialises to JSON as human-readable strings.
 type Duration time.Duration
@@ -112,7 +39,7 @@ func ParseExtendedDuration(data string) (result time.Duration, err error) {
 	if dPos+1 < len(data) { // case "12d"
 		hours, err = time.ParseDuration(data[dPos+1:])
 		if err != nil {
-			return
+			return result, err
 		}
 		if hours < 0 {
 			return 0, fmt.Errorf("invalid time format '%s'", data[dPos+1:])
@@ -121,7 +48,7 @@ func ParseExtendedDuration(data string) (result time.Duration, err error) {
 
 	days, err := strconv.ParseInt(data[:dPos], 10, 64)
 	if err != nil {
-		return
+		return result, err
 	}
 	if days < 0 {
 		hours = -hours
@@ -228,7 +155,12 @@ func (d NullDuration) ValueOrZero() Duration {
 	return d.Duration
 }
 
-func getInt64(v interface{}) (int64, error) {
+// TimeDuration returns a NullDuration's value as a stdlib Duration.
+func (d NullDuration) TimeDuration() time.Duration {
+	return time.Duration(d.Duration)
+}
+
+func getInt64(v any) (int64, error) {
 	switch n := v.(type) {
 	case int:
 		return int64(n), nil
@@ -241,7 +173,7 @@ func getInt64(v interface{}) (int64, error) {
 	case int64:
 		return n, nil
 	case uint:
-		return int64(n), nil
+		return int64(n), nil //nolint:gosec
 	case uint8:
 		return int64(n), nil
 	case uint16:
@@ -262,7 +194,7 @@ func getInt64(v interface{}) (int64, error) {
 // types to time.Duration.
 //
 // TODO: move to a separate package and check for integer overflows?
-func GetDurationValue(v interface{}) (time.Duration, error) {
+func GetDurationValue(v any) (time.Duration, error) {
 	switch d := v.(type) {
 	case time.Duration:
 		return d, nil

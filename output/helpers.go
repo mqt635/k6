@@ -1,23 +1,3 @@
-/*
- *
- * k6 - a next-generation load testing tool
- * Copyright (C) 2021 Load Impact
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- */
-
 package output
 
 import (
@@ -25,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"go.k6.io/k6/stats"
+	"go.k6.io/k6/v2/metrics"
 )
 
 // SampleBuffer is a simple thread-safe buffer for metric samples. It should be
@@ -34,12 +14,12 @@ import (
 // and we don't want to block the Engine in the meantime.
 type SampleBuffer struct {
 	sync.Mutex
-	buffer []stats.SampleContainer
+	buffer []metrics.SampleContainer
 	maxLen int
 }
 
 // AddMetricSamples adds the given metric samples to the internal buffer.
-func (sc *SampleBuffer) AddMetricSamples(samples []stats.SampleContainer) {
+func (sc *SampleBuffer) AddMetricSamples(samples []metrics.SampleContainer) {
 	if len(samples) == 0 {
 		return
 	}
@@ -51,7 +31,7 @@ func (sc *SampleBuffer) AddMetricSamples(samples []stats.SampleContainer) {
 // GetBufferedSamples returns the currently buffered metric samples and makes a
 // new internal buffer with some hopefully realistic size. If the internal
 // buffer is empty, it will return nil.
-func (sc *SampleBuffer) GetBufferedSamples() []stats.SampleContainer {
+func (sc *SampleBuffer) GetBufferedSamples() []metrics.SampleContainer {
 	sc.Lock()
 	defer sc.Unlock()
 
@@ -64,7 +44,7 @@ func (sc *SampleBuffer) GetBufferedSamples() []stats.SampleContainer {
 	}
 	// Make the new buffer halfway between the previously allocated size and the
 	// maximum buffer size we've seen so far, to hopefully reduce copying a bit.
-	sc.buffer = make([]stats.SampleContainer, 0, (bufferedLen+sc.maxLen)/2)
+	sc.buffer = make([]metrics.SampleContainer, 0, (bufferedLen+sc.maxLen)/2)
 
 	return buffered
 }

@@ -1,23 +1,3 @@
-/*
- *
- * k6 - a next-generation load testing tool
- * Copyright (C) 2020 Load Impact
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- */
-
 package types
 
 import (
@@ -29,16 +9,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-//nolint:gochecknoglobals
-var max64 = new(big.Int).Exp(big.NewInt(2), big.NewInt(64), nil)
-
 func get128BigInt(hi, lo int64) *big.Int {
+	max64 := new(big.Int).Exp(big.NewInt(2), big.NewInt(64), nil)
 	h := big.NewInt(hi)
 	h.Mul(h, max64)
 	return h.Add(h, big.NewInt(lo))
 }
 
 func TestIpBlock(t *testing.T) {
+	t.Parallel()
 	testdata := map[string]struct {
 		count           *big.Int
 		firstIP, lastIP net.IP
@@ -63,8 +42,8 @@ func TestIpBlock(t *testing.T) {
 		"fd00::2/112":     {get128BigInt(0, 65536), net.ParseIP("fd00::0"), net.ParseIP("fd00::ffff")},
 	}
 	for name, data := range testdata {
-		name, data := name, data
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			b, err := getIPBlock(name)
 			require.NoError(t, err)
 			assert.Equal(t, data.count, b.count)
@@ -78,6 +57,7 @@ func TestIpBlock(t *testing.T) {
 }
 
 func TestIPPool(t *testing.T) {
+	t.Parallel()
 	testdata := map[string]struct {
 		count   *big.Int
 		queries map[uint64]net.IP
@@ -121,8 +101,8 @@ func TestIPPool(t *testing.T) {
 		},
 	}
 	for name, data := range testdata {
-		name, data := name, data
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			p, err := NewIPPool(name)
 			require.NoError(t, err)
 			assert.Equal(t, data.count, p.count)
@@ -134,6 +114,7 @@ func TestIPPool(t *testing.T) {
 }
 
 func TestIpBlockError(t *testing.T) {
+	t.Parallel()
 	testdata := map[string]string{
 		"whatever":                       "not a valid IP",
 		"192.168.0.1012":                 "not a valid IP",
@@ -146,11 +127,28 @@ func TestIpBlockError(t *testing.T) {
 		"fd00:1:1:0::0-fd00:1:0:ff::3ff": "negative IP range",
 	}
 	for name, data := range testdata {
-		name, data := name, data
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			_, err := getIPBlock(name)
 			require.Error(t, err)
 			require.Contains(t, err.Error(), data)
 		})
 	}
+}
+
+func TestNullIPPoolMarshalText(t *testing.T) {
+	t.Parallel()
+
+	rangeInput := "192.168.20.12-192.168.20.15,192.168.10.0/27"
+	p, err := NewIPPool(rangeInput)
+	require.NoError(t, err)
+
+	nullpool := NullIPPool{
+		Pool:  p,
+		Valid: true,
+		raw:   []byte(rangeInput),
+	}
+	text, err := nullpool.MarshalText()
+	require.NoError(t, err)
+	assert.Equal(t, "192.168.20.12-192.168.20.15,192.168.10.0/27", string(text))
 }

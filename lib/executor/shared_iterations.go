@@ -1,23 +1,3 @@
-/*
- *
- * k6 - a next-generation load testing tool
- * Copyright (C) 2019 Load Impact
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- */
-
 package executor
 
 import (
@@ -30,11 +10,10 @@ import (
 	"github.com/sirupsen/logrus"
 	"gopkg.in/guregu/null.v3"
 
-	"go.k6.io/k6/lib"
-	"go.k6.io/k6/lib/metrics"
-	"go.k6.io/k6/lib/types"
-	"go.k6.io/k6/stats"
-	"go.k6.io/k6/ui/pb"
+	"go.k6.io/k6/v2/internal/ui/pb"
+	"go.k6.io/k6/v2/lib"
+	"go.k6.io/k6/v2/lib/types"
+	"go.k6.io/k6/v2/metrics"
 )
 
 const sharedIterationsType = "shared-iterations"
@@ -97,19 +76,19 @@ func (sic SharedIterationsConfig) GetDescription(et *lib.ExecutionTuple) string 
 func (sic SharedIterationsConfig) Validate() []error {
 	errors := sic.BaseConfig.Validate()
 	if sic.VUs.Int64 <= 0 {
-		errors = append(errors, fmt.Errorf("the number of VUs should be more than 0"))
+		errors = append(errors, fmt.Errorf("the number of VUs must be more than 0"))
 	}
 
 	if sic.Iterations.Int64 < sic.VUs.Int64 {
 		errors = append(errors, fmt.Errorf(
-			"the number of iterations (%d) shouldn't be less than the number of VUs (%d)",
+			"the number of iterations (%d) can't be less than the number of VUs (%d)",
 			sic.Iterations.Int64, sic.VUs.Int64,
 		))
 	}
 
-	if time.Duration(sic.MaxDuration.Duration) < minDuration {
+	if sic.MaxDuration.TimeDuration() < minDuration {
 		errors = append(errors, fmt.Errorf(
-			"the maxDuration should be at least %s, but is %s", minDuration, sic.MaxDuration,
+			"the maxDuration must be at least %s, but is %s", minDuration, sic.MaxDuration,
 		))
 	}
 
@@ -135,10 +114,10 @@ func (sic SharedIterationsConfig) GetExecutionRequirements(et *lib.ExecutionTupl
 	return []lib.ExecutionStep{
 		{
 			TimeOffset: 0,
-			PlannedVUs: uint64(vus),
+			PlannedVUs: uint64(vus), //nolint:gosec
 		},
 		{
-			TimeOffset: time.Duration(sic.MaxDuration.Duration + sic.GracefulStop.Duration),
+			TimeOffset: sic.MaxDuration.TimeDuration() + sic.GracefulStop.TimeDuration(),
 			PlannedVUs: 0,
 		},
 	}
@@ -171,10 +150,10 @@ func (sic SharedIterationsConfig) HasWork(et *lib.ExecutionTuple) bool {
 }
 
 // Init values needed for the execution
-func (si *SharedIterations) Init(ctx context.Context) error {
+func (si *SharedIterations) Init(_ context.Context) error {
 	// err should always be nil, because Init() won't be called for executors
 	// with no work, as determined by their config's HasWork() method.
-	et, err := si.BaseExecutor.executionState.ExecutionTuple.GetNewExecutionTupleFromValue(si.config.VUs.Int64)
+	et, err := si.executionState.ExecutionTuple.GetNewExecutionTupleFromValue(si.config.VUs.Int64)
 	si.et = et
 	si.iterSegIndex = lib.NewSegmentedIndex(et)
 
@@ -183,27 +162,31 @@ func (si *SharedIterations) Init(ctx context.Context) error {
 
 // Run executes a specific total number of iterations, which are all shared by
 // the configured VUs.
-// nolint:funlen
-func (si SharedIterations) Run(
-	parentCtx context.Context, out chan<- stats.SampleContainer, builtinMetrics *metrics.BuiltinMetrics,
-) (err error) {
+//
+//nolint:funlen
+func (si SharedIterations) Run(parentCtx context.Context, out chan<- metrics.SampleContainer) (err error) {
 	numVUs := si.config.GetVUs(si.executionState.ExecutionTuple)
 	iterations := si.et.ScaleInt64(si.config.Iterations.Int64)
-	duration := time.Duration(si.config.MaxDuration.Duration)
+	duration := si.config.MaxDuration.TimeDuration()
 	gracefulStop := si.config.GetGracefulStop()
 
-	startTime, maxDurationCtx, regDurationCtx, cancel := getDurationContexts(parentCtx, duration, gracefulStop)
-	defer cancel()
+	waitOnProgressChannel := make(chan struct{})
+	startTime, maxDurationCtx, regDurationCtx, cancel, regCancel := getDurationContexts(parentCtx, duration, gracefulStop)
+	defer func() {
+		cancel()
+		regCancel()
+		<-waitOnProgressChannel
+	}()
 
 	// Make sure the log and the progress bar have accurate information
 	si.logger.WithFields(logrus.Fields{
 		"vus": numVUs, "iterations": iterations, "maxDuration": duration, "type": si.config.GetType(),
 	}).Debug("Starting executor run...")
 
-	totalIters := uint64(iterations)
+	totalIters := uint64(iterations) //nolint:gosec
 	doneIters := new(uint64)
 	vusFmt := pb.GetFixedLengthIntFormat(numVUs)
-	itersFmt := pb.GetFixedLengthIntFormat(int64(totalIters))
+	itersFmt := pb.GetFixedLengthIntFormat(iterations)
 	progressFn := func() (float64, []string) {
 		spent := time.Since(startTime)
 		progVUs := fmt.Sprintf(vusFmt+" VUs", numVUs)
@@ -217,7 +200,16 @@ func (si SharedIterations) Run(
 		return float64(currentDoneIters) / float64(totalIters), right
 	}
 	si.progress.Modify(pb.WithProgress(progressFn))
-	go trackProgress(parentCtx, maxDurationCtx, regDurationCtx, &si, progressFn)
+	maxDurationCtx = lib.WithScenarioState(maxDurationCtx, &lib.ScenarioState{
+		Name:       si.config.Name,
+		Executor:   si.config.Type,
+		StartTime:  startTime,
+		ProgressFn: progressFn,
+	})
+	go func() {
+		trackProgress(parentCtx, maxDurationCtx, regDurationCtx, &si, progressFn)
+		close(waitOnProgressChannel)
+	}()
 
 	var attemptedIters uint64
 
@@ -226,22 +218,19 @@ func (si SharedIterations) Run(
 	defer func() {
 		activeVUs.Wait()
 		if attemptedIters < totalIters {
-			stats.PushIfNotDone(parentCtx, out, stats.Sample{
-				Value: float64(totalIters - attemptedIters), Metric: builtinMetrics.DroppedIterations,
-				Tags: si.getMetricTags(nil), Time: time.Now(),
+			metrics.PushIfNotDone(parentCtx, out, metrics.Sample{
+				TimeSeries: metrics.TimeSeries{
+					Metric: si.executionState.Test.BuiltinMetrics.DroppedIterations,
+					Tags:   si.getMetricTags(nil),
+				},
+				Value: float64(totalIters - attemptedIters),
+				Time:  time.Now(),
 			})
 		}
 	}()
 
 	regDurationDone := regDurationCtx.Done()
 	runIteration := getIterationRunner(si.executionState, si.logger)
-
-	maxDurationCtx = lib.WithScenarioState(maxDurationCtx, &lib.ScenarioState{
-		Name:       si.config.Name,
-		Executor:   si.config.Type,
-		StartTime:  startTime,
-		ProgressFn: progressFn,
-	})
 
 	returnVU := func(u lib.InitializedVU) {
 		si.executionState.ReturnVU(u, true)
@@ -273,7 +262,7 @@ func (si SharedIterations) Run(
 		}
 	}
 
-	for i := int64(0); i < numVUs; i++ {
+	for range numVUs {
 		initVU, err := si.executionState.GetPlannedVU(si.logger, true)
 		if err != nil {
 			cancel()

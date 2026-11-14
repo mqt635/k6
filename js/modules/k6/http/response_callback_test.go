@@ -1,48 +1,24 @@
-/*
- *
- * k6 - a next-generation load testing tool
- * Copyright (C) 2021 Load Impact
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- */
-
 package http
 
 import (
-	"context"
+	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 
-	"github.com/dop251/goja"
+	"github.com/grafana/sobek"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.k6.io/k6/js/common"
-	"go.k6.io/k6/lib"
-	"go.k6.io/k6/lib/metrics"
-	"go.k6.io/k6/stats"
+	"go.k6.io/k6/v2/lib"
+	"go.k6.io/k6/v2/metrics"
 )
 
 func TestExpectedStatuses(t *testing.T) {
 	t.Parallel()
-	rt := goja.New()
-	rt.SetFieldNameMapper(common.FieldNameMapper{})
-	ctx := context.Background()
+	runtime, _ := getTestModuleInstance(t)
+	rt := runtime.VU.RuntimeField
 
-	ctx = common.WithRuntime(ctx, rt)
-	rt.Set("http", common.Bind(rt, new(GlobalHTTP).NewModuleInstancePerVU(), &ctx))
 	cases := map[string]struct {
 		code, err string
 		expected  expectedStatuses
@@ -82,7 +58,6 @@ func TestExpectedStatuses(t *testing.T) {
 	}
 
 	for name, testCase := range cases {
-		name, testCase := name, testCase
 		t.Run(name, func(t *testing.T) {
 			val, err := rt.RunString(testCase.code)
 			if testCase.err == "" {
@@ -95,8 +70,9 @@ func TestExpectedStatuses(t *testing.T) {
 			}
 
 			require.Error(t, err)
-			exc := err.(*goja.Exception)
-			require.Contains(t, exc.Error(), testCase.err)
+			var exc *sobek.Exception
+			errors.As(err, &exc)
+			require.ErrorContains(t, exc, testCase.err)
 		})
 	}
 }
@@ -108,10 +84,11 @@ type expectedSample struct {
 
 func TestResponseCallbackInAction(t *testing.T) {
 	t.Parallel()
-	tb, _, samples, rt, ctx := newRuntime(t)
+	ts := newTestCase(t)
+	tb := ts.tb
+	samples := ts.samples
+
 	sr := tb.Replacer.Replace
-	httpModule := new(GlobalHTTP).NewModuleInstancePerVU().(*HTTP)
-	rt.Set("http", common.Bind(rt, httpModule, ctx))
 
 	HTTPMetricsWithoutFailed := []string{
 		metrics.HTTPReqsName,
@@ -124,7 +101,7 @@ func TestResponseCallbackInAction(t *testing.T) {
 		metrics.HTTPReqTLSHandshakingName,
 	}
 
-	allHTTPMetrics := append(HTTPMetricsWithoutFailed, metrics.HTTPReqFailedName)
+	allHTTPMetrics := append(HTTPMetricsWithoutFailed, metrics.HTTPReqFailedName) //nolint: gocritic
 
 	testCases := map[string]struct {
 		code            string
@@ -162,7 +139,7 @@ func TestResponseCallbackInAction(t *testing.T) {
 		"overwrite per request": {
 			code: `
 			http.setResponseCallback(http.expectedStatuses(200));
-			res = http.request("GET", "HTTPBIN_URL/redirect/1");
+			http.request("GET", "HTTPBIN_URL/redirect/1");
 			`,
 			expectedSamples: []expectedSample{
 				{
@@ -251,7 +228,7 @@ func TestResponseCallbackInAction(t *testing.T) {
 		"global overwrite with null": {
 			code: `
 			http.setResponseCallback(null);
-			res = http.request("GET", "HTTPBIN_URL/redirect/1");
+			http.request("GET", "HTTPBIN_URL/redirect/1");
 			`,
 			expectedSamples: []expectedSample{
 				{
@@ -280,13 +257,13 @@ func TestResponseCallbackInAction(t *testing.T) {
 		},
 	}
 	for name, testCase := range testCases {
-		testCase := testCase
-		t.Run(name, func(t *testing.T) {
-			httpModule.responseCallback = defaultExpectedStatuses.match
+		runCode := func(code string) {
+			t.Helper()
+			ts.instance.defaultClient.responseCallback = defaultExpectedStatuses.match
 
-			_, err := rt.RunString(sr(testCase.code))
+			_, err := ts.runtime.RunOnEventLoop(sr(code))
 			assert.NoError(t, err)
-			bufSamples := stats.GetBufferedSamples(samples)
+			bufSamples := metrics.GetBufferedSamples(samples)
 
 			reqsCount := 0
 			for _, container := range bufSamples {
@@ -302,16 +279,24 @@ func TestResponseCallbackInAction(t *testing.T) {
 			for i, expectedSample := range testCase.expectedSamples {
 				assertRequestMetricsEmittedSingle(t, bufSamples[i], expectedSample.tags, expectedSample.metrics, nil)
 			}
+		}
+		t.Run(name, func(_ *testing.T) {
+			runCode(testCase.code)
+		})
+		t.Run("async_"+name, func(_ *testing.T) {
+			runCode(strings.ReplaceAll(testCase.code, "http.request", "http.asyncRequest"))
 		})
 	}
 }
 
 func TestResponseCallbackBatch(t *testing.T) {
 	t.Parallel()
-	tb, _, samples, rt, ctx := newRuntime(t)
+	ts := newTestCase(t)
+	tb := ts.tb
+	samples := ts.samples
+	rt := ts.runtime.VU.Runtime()
+
 	sr := tb.Replacer.Replace
-	httpModule := new(GlobalHTTP).NewModuleInstancePerVU().(*HTTP)
-	rt.Set("http", common.Bind(rt, httpModule, ctx))
 
 	HTTPMetricsWithoutFailed := []string{
 		metrics.HTTPReqsName,
@@ -324,7 +309,7 @@ func TestResponseCallbackBatch(t *testing.T) {
 		metrics.HTTPReqTLSHandshakingName,
 	}
 
-	allHTTPMetrics := append(HTTPMetricsWithoutFailed, metrics.HTTPReqFailedName)
+	allHTTPMetrics := append(HTTPMetricsWithoutFailed, metrics.HTTPReqFailedName) //nolint:gocritic
 	// IMPORTANT: the tests here depend on the fact that the url they hit can be ordered in the same
 	// order as the expectedSamples even if they are made concurrently
 	testCases := map[string]struct {
@@ -391,13 +376,12 @@ func TestResponseCallbackBatch(t *testing.T) {
 		},
 	}
 	for name, testCase := range testCases {
-		testCase := testCase
 		t.Run(name, func(t *testing.T) {
-			httpModule.responseCallback = defaultExpectedStatuses.match
+			ts.instance.defaultClient.responseCallback = defaultExpectedStatuses.match
 
 			_, err := rt.RunString(sr(testCase.code))
 			assert.NoError(t, err)
-			bufSamples := stats.GetBufferedSamples(samples)
+			bufSamples := metrics.GetBufferedSamples(samples)
 
 			reqsCount := 0
 			for _, container := range bufSamples {
@@ -424,7 +408,11 @@ func TestResponseCallbackBatch(t *testing.T) {
 
 func TestResponseCallbackInActionWithoutPassedTag(t *testing.T) {
 	t.Parallel()
-	tb, state, samples, rt, ctx := newRuntime(t)
+	ts := newTestCase(t)
+	tb := ts.tb
+	samples := ts.samples
+	rt := ts.runtime.VU.Runtime()
+	state := ts.runtime.VU.State()
 	sr := tb.Replacer.Replace
 	allHTTPMetrics := []string{
 		metrics.HTTPReqsName,
@@ -437,13 +425,11 @@ func TestResponseCallbackInActionWithoutPassedTag(t *testing.T) {
 		metrics.HTTPReqWaitingName,
 		metrics.HTTPReqTLSHandshakingName,
 	}
-	deleteSystemTag(state, stats.TagExpectedResponse.String())
-	httpModule := new(GlobalHTTP).NewModuleInstancePerVU().(*HTTP)
-	rt.Set("http", common.Bind(rt, httpModule, ctx))
+	deleteSystemTag(state, metrics.TagExpectedResponse.String())
 
 	_, err := rt.RunString(sr(`http.request("GET", "HTTPBIN_URL/redirect/1", null, {responseCallback: http.expectedStatuses(200)});`))
 	assert.NoError(t, err)
-	bufSamples := stats.GetBufferedSamples(samples)
+	bufSamples := metrics.GetBufferedSamples(samples)
 
 	reqsCount := 0
 	for _, container := range bufSamples {
@@ -464,27 +450,27 @@ func TestResponseCallbackInActionWithoutPassedTag(t *testing.T) {
 		"group":  "",
 		"proto":  "HTTP/1.1",
 	}
-	assertRequestMetricsEmittedSingle(t, bufSamples[0], tags, allHTTPMetrics, func(sample stats.Sample) {
+	assertRequestMetricsEmittedSingle(t, bufSamples[0], tags, allHTTPMetrics, func(sample metrics.Sample) {
 		if sample.Metric.Name == metrics.HTTPReqFailedName {
-			require.EqualValues(t, sample.Value, 1)
+			require.EqualValues(t, 1, sample.Value)
 		}
 	})
 	tags["url"] = sr("HTTPBIN_URL/get")
 	tags["name"] = tags["url"]
 	tags["status"] = "200"
-	assertRequestMetricsEmittedSingle(t, bufSamples[1], tags, allHTTPMetrics, func(sample stats.Sample) {
+	assertRequestMetricsEmittedSingle(t, bufSamples[1], tags, allHTTPMetrics, func(sample metrics.Sample) {
 		if sample.Metric.Name == metrics.HTTPReqFailedName {
-			require.EqualValues(t, sample.Value, 0)
+			require.EqualValues(t, 0, sample.Value)
 		}
 	})
 }
 
 func TestDigestWithResponseCallback(t *testing.T) {
 	t.Parallel()
-	tb, _, samples, rt, ctx := newRuntime(t)
-
-	httpModule := new(GlobalHTTP).NewModuleInstancePerVU().(*HTTP)
-	rt.Set("http", common.Bind(rt, httpModule, ctx))
+	ts := newTestCase(t)
+	tb := ts.tb
+	samples := ts.samples
+	rt := ts.runtime.VU.Runtime()
 
 	urlWithCreds := tb.Replacer.Replace(
 		"http://testuser:testpwd@HTTPBIN_IP:HTTPBIN_PORT/digest-auth/auth/testuser/testpwd",
@@ -507,7 +493,7 @@ func TestDigestWithResponseCallback(t *testing.T) {
 		if (res.error_code !== 0) { throw new Error("wrong error code: " + res.error_code); }
 	`, urlWithCreds))
 	require.NoError(t, err)
-	bufSamples := stats.GetBufferedSamples(samples)
+	bufSamples := metrics.GetBufferedSamples(samples)
 
 	reqsCount := 0
 	for _, container := range bufSamples {
@@ -533,16 +519,16 @@ func TestDigestWithResponseCallback(t *testing.T) {
 		"expected_response": "true",
 		"error_code":        "1401",
 	}
-	assertRequestMetricsEmittedSingle(t, bufSamples[0], tags, allHTTPMetrics, func(sample stats.Sample) {
+	assertRequestMetricsEmittedSingle(t, bufSamples[0], tags, allHTTPMetrics, func(sample metrics.Sample) {
 		if sample.Metric.Name == metrics.HTTPReqFailedName {
-			require.EqualValues(t, sample.Value, 0)
+			require.EqualValues(t, 0, sample.Value)
 		}
 	})
 	tags["status"] = "200"
 	delete(tags, "error_code")
-	assertRequestMetricsEmittedSingle(t, bufSamples[1], tags, allHTTPMetrics, func(sample stats.Sample) {
+	assertRequestMetricsEmittedSingle(t, bufSamples[1], tags, allHTTPMetrics, func(sample metrics.Sample) {
 		if sample.Metric.Name == metrics.HTTPReqFailedName {
-			require.EqualValues(t, sample.Value, 0)
+			require.EqualValues(t, 0, sample.Value)
 		}
 	})
 }
@@ -554,5 +540,5 @@ func deleteSystemTag(state *lib.State, tag string) {
 	for k := range enabledTags {
 		tagsList = append(tagsList, k)
 	}
-	state.Options.SystemTags = stats.ToSystemTagSet(tagsList)
+	state.Options.SystemTags = metrics.ToSystemTagSet(tagsList)
 }

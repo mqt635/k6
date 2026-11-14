@@ -1,55 +1,35 @@
-/*
- *
- * k6 - a next-generation load testing tool
- * Copyright (C) 2019 Load Impact
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- */
-
 package executor
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 	"time"
 
 	"github.com/sirupsen/logrus"
 
-	"go.k6.io/k6/errext"
-	"go.k6.io/k6/lib"
-	"go.k6.io/k6/lib/types"
-	"go.k6.io/k6/ui/pb"
+	"go.k6.io/k6/v2/errext"
+	"go.k6.io/k6/v2/internal/execution"
+	"go.k6.io/k6/v2/internal/ui/pb"
+	"go.k6.io/k6/v2/lib"
+	"go.k6.io/k6/v2/lib/types"
 )
 
 func sumStagesDuration(stages []Stage) (result time.Duration) {
 	for _, s := range stages {
-		result += time.Duration(s.Duration.Duration)
+		result += s.Duration.TimeDuration()
 	}
-	return
+	return result
 }
 
 func getStagesUnscaledMaxTarget(unscaledStartValue int64, stages []Stage) int64 {
-	max := unscaledStartValue
+	result := unscaledStartValue
 	for _, s := range stages {
-		if s.Target.Int64 > max {
-			max = s.Target.Int64
+		if s.Target.Int64 > result {
+			result = s.Target.Int64
 		}
 	}
-	return max
+	return result
 }
 
 // A helper function to avoid code duplication
@@ -65,15 +45,27 @@ func validateStages(stages []Stage) []error {
 		if !s.Duration.Valid {
 			errors = append(errors, fmt.Errorf("stage %d doesn't have a duration", stageNum))
 		} else if s.Duration.Duration < 0 {
-			errors = append(errors, fmt.Errorf("the duration for stage %d shouldn't be negative", stageNum))
+			errors = append(errors, fmt.Errorf("the duration for stage %d can't be negative", stageNum))
 		}
 		if !s.Target.Valid {
 			errors = append(errors, fmt.Errorf("stage %d doesn't have a target", stageNum))
 		} else if s.Target.Int64 < 0 {
-			errors = append(errors, fmt.Errorf("the target for stage %d shouldn't be negative", stageNum))
+			errors = append(errors, fmt.Errorf("the target for stage %d can't be negative", stageNum))
 		}
 	}
 	return errors
+}
+
+// handleInterrupt returns true if err is InterruptError and if so it
+// cancels the executor context passed with ctx.
+func handleInterrupt(ctx context.Context, err error) bool {
+	if err != nil {
+		if errext.IsInterruptError(err) {
+			execution.AbortTestRun(ctx, err)
+			return true
+		}
+	}
+	return false
 }
 
 // getIterationRunner is a helper function that returns an iteration executor
@@ -98,13 +90,14 @@ func getIterationRunner(
 			return false
 		default:
 			if err != nil {
-				var exception errext.Exception
-				if errors.As(err, &exception) {
-					// TODO don't count this as a full iteration?
-					logger.WithField("source", "stacktrace").Error(exception.StackTrace())
-				} else {
-					logger.Error(err.Error())
+				if handleInterrupt(ctx, err) {
+					executionState.AddInterruptedIterations(1)
+					return false
 				}
+
+				// TODO don't count this as a full iteration?
+				errText, fields := errext.Format(err)
+				logger.WithFields(logrus.Fields(fields)).Error(errText)
 				// TODO: investigate context cancelled errors
 			}
 
@@ -129,29 +122,31 @@ func getIterationRunner(
 // only the regular duration.
 //
 // In either case, the usage of these contexts should be like this:
-//  - As long as the regDurationCtx isn't done, new iterations can be started.
-//  - After regDurationCtx is done, no new iterations should be started; every
-//    VU that finishes an iteration from now on can be returned to the buffer
-//    pool in the ExecutionState struct.
-//  - After maxDurationCtx is done, any VUs with iterations will be
-//    interrupted by the context's closing and will be returned to the buffer.
-//  - If you want to interrupt the execution of all VUs prematurely (e.g. there
-//    was an error or something like that), trigger maxDurationCancel().
-//  - If the whole test is aborted, the parent context will be cancelled, so
-//    that will also cancel these contexts, thus the "general abort" case is
-//    handled transparently.
+//   - As long as the regDurationCtx isn't done, new iterations can be started.
+//   - After regDurationCtx is done, no new iterations should be started; every
+//     VU that finishes an iteration from now on can be returned to the buffer
+//     pool in the ExecutionState struct.
+//   - After maxDurationCtx is done, any VUs with iterations will be
+//     interrupted by the context's closing and will be returned to the buffer.
+//   - If you want to interrupt the execution of all VUs prematurely (e.g. there
+//     was an error or something like that), trigger maxDurationCancel().
+//   - If the whole test is aborted, the parent context will be cancelled, so
+//     that will also cancel these contexts, thus the "general abort" case is
+//     handled transparently.
 func getDurationContexts(parentCtx context.Context, regularDuration, gracefulStop time.Duration) (
-	startTime time.Time, maxDurationCtx, regDurationCtx context.Context, maxDurationCancel func(),
+	startTime time.Time,
+	maxDurationCtx, regDurationCtx context.Context,
+	maxDurationCancel func(), regDurationCancel func(),
 ) {
 	startTime = time.Now()
 	maxEndTime := startTime.Add(regularDuration + gracefulStop)
 
 	maxDurationCtx, maxDurationCancel = context.WithDeadline(parentCtx, maxEndTime)
 	if gracefulStop == 0 {
-		return startTime, maxDurationCtx, maxDurationCtx, maxDurationCancel
+		return startTime, maxDurationCtx, maxDurationCtx, maxDurationCancel, maxDurationCancel
 	}
-	regDurationCtx, _ = context.WithDeadline(maxDurationCtx, startTime.Add(regularDuration)) //nolint:govet
-	return startTime, maxDurationCtx, regDurationCtx, maxDurationCancel
+	regDurationCtx, regDurationCancel = context.WithDeadline(maxDurationCtx, startTime.Add(regularDuration))
+	return startTime, maxDurationCtx, regDurationCtx, maxDurationCancel, regDurationCancel
 }
 
 // trackProgress is a helper function that monitors certain end-events in an

@@ -1,23 +1,3 @@
-/*
- *
- * k6 - a next-generation load testing tool
- * Copyright (C) 2019 Load Impact
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- */
-
 package executor
 
 import (
@@ -32,11 +12,10 @@ import (
 	"github.com/sirupsen/logrus"
 	"gopkg.in/guregu/null.v3"
 
-	"go.k6.io/k6/lib"
-	"go.k6.io/k6/lib/metrics"
-	"go.k6.io/k6/lib/types"
-	"go.k6.io/k6/stats"
-	"go.k6.io/k6/ui/pb"
+	"go.k6.io/k6/v2/internal/ui/pb"
+	"go.k6.io/k6/v2/lib"
+	"go.k6.io/k6/v2/lib/types"
+	"go.k6.io/k6/v2/metrics"
 )
 
 const constantArrivalRateType = "constant-arrival-rate"
@@ -95,7 +74,7 @@ func (carc ConstantArrivalRateConfig) GetDescription(et *lib.ExecutionTuple) str
 		maxVUsRange += fmt.Sprintf("-%d", maxVUs)
 	}
 
-	timeUnit := time.Duration(carc.TimeUnit.Duration)
+	timeUnit := carc.TimeUnit.TimeDuration()
 	var arrRatePerSec float64
 	if maxVUs != 0 { // TODO: do something better?
 		ratio := big.NewRat(maxVUs, carc.MaxVUs.Int64)
@@ -114,32 +93,32 @@ func (carc *ConstantArrivalRateConfig) Validate() []error {
 	if !carc.Rate.Valid {
 		errors = append(errors, fmt.Errorf("the iteration rate isn't specified"))
 	} else if carc.Rate.Int64 <= 0 {
-		errors = append(errors, fmt.Errorf("the iteration rate should be more than 0"))
+		errors = append(errors, fmt.Errorf("the iteration rate must be more than 0"))
 	}
 
-	if time.Duration(carc.TimeUnit.Duration) <= 0 {
-		errors = append(errors, fmt.Errorf("the timeUnit should be more than 0"))
+	if carc.TimeUnit.TimeDuration() <= 0 {
+		errors = append(errors, fmt.Errorf("the timeUnit must be more than 0"))
 	}
 
 	if !carc.Duration.Valid {
 		errors = append(errors, fmt.Errorf("the duration is unspecified"))
-	} else if time.Duration(carc.Duration.Duration) < minDuration {
+	} else if carc.Duration.TimeDuration() < minDuration {
 		errors = append(errors, fmt.Errorf(
-			"the duration should be at least %s, but is %s", minDuration, carc.Duration,
+			"the duration must be at least %s, but is %s", minDuration, carc.Duration,
 		))
 	}
 
 	if !carc.PreAllocatedVUs.Valid {
 		errors = append(errors, fmt.Errorf("the number of preAllocatedVUs isn't specified"))
 	} else if carc.PreAllocatedVUs.Int64 < 0 {
-		errors = append(errors, fmt.Errorf("the number of preAllocatedVUs shouldn't be negative"))
+		errors = append(errors, fmt.Errorf("the number of preAllocatedVUs can't be negative"))
 	}
 
 	if !carc.MaxVUs.Valid {
 		// TODO: don't change the config while validating
 		carc.MaxVUs.Int64 = carc.PreAllocatedVUs.Int64
 	} else if carc.MaxVUs.Int64 < carc.PreAllocatedVUs.Int64 {
-		errors = append(errors, fmt.Errorf("maxVUs shouldn't be less than preAllocatedVUs"))
+		errors = append(errors, fmt.Errorf("maxVUs can't be less than preAllocatedVUs"))
 	}
 
 	return errors
@@ -154,10 +133,10 @@ func (carc ConstantArrivalRateConfig) GetExecutionRequirements(et *lib.Execution
 	return []lib.ExecutionStep{
 		{
 			TimeOffset:      0,
-			PlannedVUs:      uint64(et.ScaleInt64(carc.PreAllocatedVUs.Int64)),
-			MaxUnplannedVUs: uint64(et.ScaleInt64(carc.MaxVUs.Int64) - et.ScaleInt64(carc.PreAllocatedVUs.Int64)),
+			PlannedVUs:      uint64(et.ScaleInt64(carc.PreAllocatedVUs.Int64)),                                    //nolint:gosec
+			MaxUnplannedVUs: uint64(et.ScaleInt64(carc.MaxVUs.Int64) - et.ScaleInt64(carc.PreAllocatedVUs.Int64)), //nolint:gosec
 		}, {
-			TimeOffset:      time.Duration(carc.Duration.Duration + carc.GracefulStop.Duration),
+			TimeOffset:      carc.Duration.TimeDuration() + carc.GracefulStop.TimeDuration(),
 			PlannedVUs:      0,
 			MaxUnplannedVUs: 0,
 		},
@@ -191,10 +170,10 @@ type ConstantArrivalRate struct {
 var _ lib.Executor = &ConstantArrivalRate{}
 
 // Init values needed for the execution
-func (car *ConstantArrivalRate) Init(ctx context.Context) error {
+func (car *ConstantArrivalRate) Init(_ context.Context) error {
 	// err should always be nil, because Init() won't be called for executors
 	// with no work, as determined by their config's HasWork() method.
-	et, err := car.BaseExecutor.executionState.ExecutionTuple.GetNewExecutionTupleFromValue(car.config.MaxVUs.Int64)
+	et, err := car.executionState.ExecutionTuple.GetNewExecutionTupleFromValue(car.config.MaxVUs.Int64)
 	car.et = et
 	car.iterSegIndex = lib.NewSegmentedIndex(et)
 
@@ -211,17 +190,16 @@ func (car *ConstantArrivalRate) Init(ctx context.Context) error {
 // time should iteration X begin) different, but keep everything else the same.
 // This will allow us to implement https://github.com/k6io/k6/issues/1386
 // and things like all of the TODOs below in one place only.
-//nolint:funlen,cyclop
-func (car ConstantArrivalRate) Run(
-	parentCtx context.Context, out chan<- stats.SampleContainer, builtinMetrics *metrics.BuiltinMetrics,
-) (err error) {
+//
+//nolint:funlen
+func (car ConstantArrivalRate) Run(parentCtx context.Context, out chan<- metrics.SampleContainer) (err error) {
 	gracefulStop := car.config.GetGracefulStop()
-	duration := time.Duration(car.config.Duration.Duration)
+	duration := car.config.Duration.TimeDuration()
 	preAllocatedVUs := car.config.GetPreAllocatedVUs(car.executionState.ExecutionTuple)
 	maxVUs := car.config.GetMaxVUs(car.executionState.ExecutionTuple)
 	// TODO: refactor and simplify
-	arrivalRate := getScaledArrivalRate(car.et.Segment, car.config.Rate.Int64, time.Duration(car.config.TimeUnit.Duration))
-	tickerPeriod := time.Duration(getTickerPeriod(arrivalRate).Duration)
+	arrivalRate := getScaledArrivalRate(car.et.Segment, car.config.Rate.Int64, car.config.TimeUnit.TimeDuration())
+	tickerPeriod := getTickerPeriod(arrivalRate).TimeDuration()
 	arrivalRatePerSec, _ := getArrivalRatePerSec(arrivalRate).Float64()
 
 	// Make sure the log and the progress bar have accurate information
@@ -233,9 +211,15 @@ func (car ConstantArrivalRate) Run(
 	activeVUsWg := &sync.WaitGroup{}
 
 	returnedVUs := make(chan struct{})
-	startTime, maxDurationCtx, regDurationCtx, cancel := getDurationContexts(parentCtx, duration, gracefulStop)
+	waitOnProgressChannel := make(chan struct{})
+	startTime, maxDurationCtx, regDurationCtx, cancel, regCancel := getDurationContexts(parentCtx, duration, gracefulStop)
+	defer func() {
+		cancel()
+		regCancel()
+		<-waitOnProgressChannel
+	}()
 
-	vusPool := newActiveVUPool()
+	vusPool := newActiveVUPool(car.executionState)
 	defer func() {
 		// Make sure all VUs aren't executing iterations anymore, for the cancel()
 		// below to deactivate them.
@@ -249,7 +233,7 @@ func (car ConstantArrivalRate) Run(
 
 	vusFmt := pb.GetFixedLengthIntFormat(maxVUs)
 	progIters := fmt.Sprintf(
-		pb.GetFixedLengthFloatFormat(arrivalRatePerSec, 0)+" iters/s", arrivalRatePerSec)
+		pb.GetFixedLengthFloatFormat(arrivalRatePerSec, 2)+" iters/s", arrivalRatePerSec)
 	progressFn := func() (float64, []string) {
 		spent := time.Since(startTime)
 		currActiveVUs := atomic.LoadUint64(&activeVUsCount)
@@ -269,8 +253,6 @@ func (car ConstantArrivalRate) Run(
 		return math.Min(1, float64(spent)/float64(duration)), right
 	}
 	car.progress.Modify(pb.WithProgress(progressFn))
-	go trackProgress(parentCtx, maxDurationCtx, regDurationCtx, &car, progressFn)
-
 	maxDurationCtx = lib.WithScenarioState(maxDurationCtx, &lib.ScenarioState{
 		Name:       car.config.Name,
 		Executor:   car.config.Type,
@@ -278,8 +260,17 @@ func (car ConstantArrivalRate) Run(
 		ProgressFn: progressFn,
 	})
 
+	go func() {
+		trackProgress(parentCtx, maxDurationCtx, regDurationCtx, &car, progressFn)
+		close(waitOnProgressChannel)
+	}()
+
 	returnVU := func(u lib.InitializedVU) {
-		car.executionState.ReturnVU(u, true)
+		// Return the VU without decreasing the global active VU counter, which
+		// is done in the goroutine started by activeVUPool.AddVU, whenever the
+		// VU finishes running an iteration. This results in a more accurate
+		// report of VUs that are _actually_ active.
+		car.executionState.ReturnVU(u, false)
 		activeVUsWg.Done()
 	}
 
@@ -290,7 +281,6 @@ func (car ConstantArrivalRate) Run(
 			maxDurationCtx, car.config.BaseConfig, returnVU,
 			car.nextIterationCounters,
 		))
-		car.executionState.ModCurrentlyActiveVUsCount(+1)
 		atomic.AddUint64(&activeVUsCount, 1)
 		vusPool.AddVU(maxDurationCtx, activeVU, runIterationBasic)
 		return activeVU
@@ -315,7 +305,7 @@ func (car ConstantArrivalRate) Run(
 	}()
 
 	// Get the pre-allocated VUs in the local buffer
-	for i := int64(0); i < preAllocatedVUs; i++ {
+	for range preAllocatedVUs {
 		initVU, err := car.executionState.GetPlannedVU(car.logger, false)
 		if err != nil {
 			return err
@@ -326,14 +316,13 @@ func (car ConstantArrivalRate) Run(
 	start, offsets, _ := car.et.GetStripedOffsets()
 	timer := time.NewTimer(time.Hour * 24)
 	// here the we need the not scaled one
-	notScaledTickerPeriod := time.Duration(
-		getTickerPeriod(
-			big.NewRat(
-				car.config.Rate.Int64,
-				int64(time.Duration(car.config.TimeUnit.Duration)),
-			)).Duration)
+	notScaledTickerPeriod := getTickerPeriod(
+		big.NewRat(
+			car.config.Rate.Int64,
+			int64(car.config.TimeUnit.TimeDuration()),
+		)).TimeDuration()
 
-	droppedIterationMetric := builtinMetrics.DroppedIterations
+	droppedIterationMetric := car.executionState.Test.BuiltinMetrics.DroppedIterations
 	shownWarning := false
 	metricTags := car.getMetricTags(nil)
 	for li, gi := 0, start; ; li, gi = li+1, gi+offsets[li%len(offsets)] {
@@ -348,9 +337,13 @@ func (car ConstantArrivalRate) Run(
 			// Since there aren't any free VUs available, consider this iteration
 			// dropped - we aren't going to try to recover it, but
 
-			stats.PushIfNotDone(parentCtx, out, stats.Sample{
-				Value: 1, Metric: droppedIterationMetric,
-				Tags: metricTags, Time: time.Now(),
+			metrics.PushIfNotDone(parentCtx, out, metrics.Sample{
+				TimeSeries: metrics.TimeSeries{
+					Metric: droppedIterationMetric,
+					Tags:   metricTags,
+				},
+				Time:  time.Now(),
+				Value: 1,
 			})
 
 			// We'll try to start allocating another VU in the background,

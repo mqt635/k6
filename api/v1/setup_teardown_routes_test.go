@@ -1,49 +1,28 @@
-/*
- *
- * k6 - a next-generation load testing tool
- * Copyright (C) 2018 Load Impact
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- */
-
 package v1
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
 
-	"github.com/manyminds/api2go/jsonapi"
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/guregu/null.v3"
 
-	"go.k6.io/k6/core"
-	"go.k6.io/k6/core/local"
-	"go.k6.io/k6/js"
-	"go.k6.io/k6/lib"
-	"go.k6.io/k6/lib/metrics"
-	"go.k6.io/k6/lib/testutils"
-	"go.k6.io/k6/lib/types"
-	"go.k6.io/k6/loader"
+	"go.k6.io/k6/v2/internal/execution"
+	"go.k6.io/k6/v2/internal/execution/local"
+	"go.k6.io/k6/v2/internal/js"
+	"go.k6.io/k6/v2/internal/loader"
+	"go.k6.io/k6/v2/internal/metrics/engine"
+	"go.k6.io/k6/v2/lib"
+	"go.k6.io/k6/v2/lib/types"
+	"go.k6.io/k6/v2/metrics"
+	"go.k6.io/k6/v2/output"
 )
 
 func TestSetupData(t *testing.T) {
@@ -81,7 +60,6 @@ func TestSetupData(t *testing.T) {
 				{"GET", "", `{}`},
 			},
 		}, {
-
 			name: "noSetup",
 			script: []byte(`
 			export default function(data) {
@@ -134,80 +112,99 @@ func TestSetupData(t *testing.T) {
 			},
 		},
 	}
-	logger := logrus.New()
-	logger.SetOutput(testutils.NewTestOutput(t))
-	registry := metrics.NewRegistry()
-	builtinMetrics := metrics.RegisterBuiltinMetrics(registry)
-	for _, testCase := range testCases {
-		testCase := testCase
+
+	runTestCase := func(t *testing.T, tcid int) {
+		testCase := testCases[tcid]
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
-			runner, err := js.New(
-				logger,
-				&loader.SourceData{URL: &url.URL{Path: "/script.js"}, Data: testCase.script},
-				nil,
-				lib.RuntimeOptions{},
-				builtinMetrics,
-				registry,
-			)
+
+			piState := getTestPreInitState(t)
+			sourceData := &loader.SourceData{
+				URL:  &url.URL{Path: "/script.js"},
+				Data: testCase.script,
+			}
+			moduleResolver := js.NewModuleResolver(loader.Dir(sourceData.URL), piState, nil)
+			runner, err := js.New(piState, sourceData, nil, moduleResolver)
 			require.NoError(t, err)
-			runner.SetOptions(lib.Options{
+
+			testState := getTestRunState(t, lib.Options{
 				Paused:          null.BoolFrom(true),
 				VUs:             null.IntFrom(2),
 				Iterations:      null.IntFrom(3),
 				NoSetup:         null.BoolFrom(true),
 				SetupTimeout:    types.NullDurationFrom(5 * time.Second),
 				TeardownTimeout: types.NullDurationFrom(5 * time.Second),
-			})
-			execScheduler, err := local.NewExecutionScheduler(runner, logger)
+			}, runner)
+
+			execScheduler, err := execution.NewScheduler(testState, local.NewController())
 			require.NoError(t, err)
-			engine, err := core.NewEngine(execScheduler, runner.GetOptions(), lib.RuntimeOptions{}, nil, logger, builtinMetrics)
+			metricsEngine, err := engine.NewMetricsEngine(testState.Registry, testState.Logger)
 			require.NoError(t, err)
 
-			globalCtx, globalCancel := context.WithCancel(context.Background())
-			runCtx, runCancel := context.WithCancel(globalCtx)
-			run, wait, err := engine.Init(globalCtx, runCtx)
-			defer wait()
-			defer globalCancel()
+			globalCtx := t.Context()
+			runCtx, runAbort := execution.NewTestRunContext(globalCtx, testState.Logger)
+			defer runAbort(fmt.Errorf("unexpected abort"))
 
+			outputManager := output.NewManager([]output.Output{metricsEngine.CreateIngester()}, testState.Logger, runAbort)
+			samples := make(chan metrics.SampleContainer, 1000)
+			_, stopOutputs, err := outputManager.Start(samples)
 			require.NoError(t, err)
+			defer stopOutputs(nil)
+
+			cs := &ControlSurface{
+				RunCtx:        runCtx,
+				Samples:       samples,
+				MetricsEngine: metricsEngine,
+				Scheduler:     execScheduler,
+				RunState:      testState,
+			}
 
 			errC := make(chan error)
-			go func() { errC <- run() }()
+			go func() { errC <- execScheduler.Run(globalCtx, runCtx, samples) }()
 
-			handler := NewHandler()
+			handler := NewHandler(cs)
 
 			checkSetup := func(method, body, expResult string) {
 				rw := httptest.NewRecorder()
-				handler.ServeHTTP(rw, newRequestWithEngine(engine, method, "/v1/setup", bytes.NewBufferString(body)))
+				handler.ServeHTTP(rw, httptest.NewRequestWithContext(t.Context(), method, "/v1/setup", bytes.NewBufferString(body)))
 				res := rw.Result()
+				t.Cleanup(func() {
+					assert.NoError(t, res.Body.Close())
+				})
 				if !assert.Equal(t, http.StatusOK, res.StatusCode) {
 					t.Logf("body: %s\n", rw.Body.String())
 					return
 				}
 
-				var doc jsonapi.Document
+				var doc setUpJSONAPI
 				assert.NoError(t, json.Unmarshal(rw.Body.Bytes(), &doc))
-				require.NotNil(t, doc.Data)
-				require.NotNil(t, doc.Data.DataObject)
-				assert.Equal(t, "setupData", doc.Data.DataObject.Type)
-				assert.JSONEq(t, expResult, string(doc.Data.DataObject.Attributes))
+				assert.Equal(t, "setupData", doc.Data.Type)
+
+				encoded, err := json.Marshal(doc.Data.Attributes)
+				assert.NoError(t, err)
+				assert.JSONEq(t, expResult, string(encoded))
 			}
 
 			for _, setupRun := range testCase.setupRuns {
 				checkSetup(setupRun[0], setupRun[1], setupRun[2])
 			}
 
-			require.NoError(t, engine.ExecutionScheduler.SetPaused(false))
+			require.NoError(t, cs.Scheduler.SetPaused(false))
 
 			select {
 			case <-time.After(10 * time.Second):
-				runCancel()
 				t.Fatal("Test timed out")
 			case err := <-errC:
-				runCancel()
+				close(samples)
 				require.NoError(t, err)
 			}
+		})
+	}
+
+	for id := range testCases {
+		t.Run(fmt.Sprintf("testcase_%d", id), func(t *testing.T) {
+			t.Parallel()
+			runTestCase(t, id)
 		})
 	}
 }

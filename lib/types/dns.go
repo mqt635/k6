@@ -1,31 +1,11 @@
-/*
- *
- * k6 - a next-generation load testing tool
- * Copyright (C) 2020 Load Impact
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- */
-
 package types
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 
-	"github.com/kubernetes/helm/pkg/strvals"
 	"gopkg.in/guregu/null.v3"
 )
 
@@ -53,6 +33,7 @@ func DefaultDNSConfig() DNSConfig {
 }
 
 // DNSPolicy specifies the preference for handling IP versions in DNS resolutions.
+//
 //go:generate enumer -type=DNSPolicy -trimprefix DNS -output dns_policy_gen.go
 type DNSPolicy uint8
 
@@ -122,6 +103,7 @@ func (d NullDNSPolicy) MarshalJSON() ([]byte, error) {
 
 // DNSSelect is the strategy to use when picking a single IP if more than one
 // is returned for a host name.
+//
 //go:generate enumer -type=DNSSelect -trimprefix DNS -output dns_select_gen.go
 type DNSSelect uint8
 
@@ -213,33 +195,37 @@ func (c *DNSConfig) UnmarshalText(text []byte) error {
 		*c = DefaultDNSConfig()
 		return nil
 	}
-	params, err := strvals.Parse(string(text))
-	if err != nil {
-		return err
+	values := strings.Split(string(text), ",")
+	params := make(map[string]string, len(values))
+	for _, value := range values {
+		k, v, _ := strings.Cut(value, "=")
+		if v == "" {
+			return fmt.Errorf("no value for key %s", value)
+		}
+		params[k] = v
 	}
 	return c.unmarshal(params)
 }
 
-func (c *DNSConfig) unmarshal(params map[string]interface{}) error {
+func (c *DNSConfig) unmarshal(params map[string]string) error {
 	for k, v := range params {
 		switch k {
 		case "policy":
-			p, err := DNSPolicyString(v.(string))
+			p, err := DNSPolicyString(v)
 			if err != nil {
 				return err
 			}
 			c.Policy.DNSPolicy = p
 			c.Policy.Valid = true
 		case "select":
-			s, err := DNSSelectString(v.(string))
+			s, err := DNSSelectString(v)
 			if err != nil {
 				return err
 			}
 			c.Select.DNSSelect = s
 			c.Select.Valid = true
 		case "ttl":
-			ttlv := fmt.Sprintf("%v", v)
-			c.TTL = null.StringFrom(ttlv)
+			c.TTL = null.StringFrom(v)
 		default:
 			return fmt.Errorf("unknown DNS configuration field: %s", k)
 		}
